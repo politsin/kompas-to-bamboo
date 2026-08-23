@@ -42,6 +42,7 @@ install-kompas-plugin.bat
 ```
 
 Run the installer as Administrator. KOMPAS-3D discovers COM libraries through machine-level registration with the `Kompas_Library` marker, so per-user registration is intentionally not used here.
+For KOMPAS-3D v24 the installer also writes `C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambu.kit.config`, because the Applications menu is populated from kit config files.
 
 After install:
 
