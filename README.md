@@ -34,7 +34,6 @@ Build outputs are in `dist`:
 
 - `kompas-bambu.exe` - exporter/launcher
 - `plugin\KompasBambuPlugin.dll` - KOMPAS COM library
-- `kompas-bambu-hotkey.exe` - Ctrl+Shift+S listener
 
 Install:
 
@@ -42,13 +41,15 @@ Install:
 install-kompas-plugin.bat
 ```
 
-The installer first tries normal x64 `RegAsm /codebase`. If it has no administrator rights, it falls back to per-user COM registration under `HKCU\Software\Classes`.
+Run the installer as Administrator. KOMPAS-3D discovers COM libraries through machine-level registration with the `Kompas_Library` marker, so per-user registration is intentionally not used here.
 
 After install:
 
 1. Restart KOMPAS-3D.
 2. Open Applications/Libraries and load `Bambu Studio`.
-3. Use `Bambu STEP` from the library menu, or press `Ctrl+Shift+S` while a KOMPAS window is active.
+3. Use `Bambu STEP` from the library menu or press `Ctrl+Shift+S`.
+
+No Windows-global hotkey is installed. `Ctrl+Shift+S` is handled through the KOMPAS application keyboard event while the `Bambu Studio` library is loaded.
 
 Uninstall:
 

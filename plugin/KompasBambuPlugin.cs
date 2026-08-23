@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Windows.Forms;
 
 namespace KompasBambu
@@ -16,10 +17,14 @@ namespace KompasBambu
     {
         private const short CommandBambuStep = 1;
         private const short CommandBambuStl = 2;
+        private const short CommandEnableShortcut = 3;
+
+        private static KeyboardHook keyboardHook;
 
         [return: MarshalAs(UnmanagedType.BStr)]
         public string GetLibraryName()
         {
+            TryInstallKeyboardHook(null, false);
             return "Bambu Studio";
         }
 
@@ -32,11 +37,14 @@ namespace KompasBambu
             {
                 case 1:
                     command = CommandBambuStep;
-                    return "Bambu STEP\tCtrl+Shift+S";
+                    return "Bambu STEP";
                 case 2:
                     command = CommandBambuStl;
                     return "Bambu STL";
                 case 3:
+                    command = CommandEnableShortcut;
+                    return "Enable Ctrl+Shift+S";
+                case 4:
                     itemType = 3;
                     command = -1;
                     return string.Empty;
@@ -52,16 +60,30 @@ namespace KompasBambu
             [In] short mode,
             [In, MarshalAs(UnmanagedType.IDispatch)] object kompas)
         {
-            string exe = FindExporter();
-            string format = command == CommandBambuStl ? "stl" : "step";
-
-            Process.Start(new ProcessStartInfo
+            try
             {
-                FileName = exe,
-                Arguments = format,
-                UseShellExecute = false,
-                WorkingDirectory = Path.GetDirectoryName(exe)
-            });
+                if (command == CommandEnableShortcut)
+                {
+                    TryInstallKeyboardHook(kompas, true);
+                    return;
+                }
+
+                TryInstallKeyboardHook(kompas, false);
+                string exe = FindExporter();
+                string format = command == CommandBambuStl ? "stl" : "step";
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = format,
+                    UseShellExecute = false,
+                    WorkingDirectory = Path.GetDirectoryName(exe)
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("KOMPAS Bambu command failed:\n" + ex.Message, "Bambu Studio");
+            }
         }
 
         public short GetProtectNumber()
@@ -81,6 +103,125 @@ namespace KompasBambu
             }
 
             throw new FileNotFoundException("kompas-bambu.exe was not found next to the plugin.", exe);
+        }
+
+        private static void RunExporter(string format)
+        {
+            string exe = FindExporter();
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = format,
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(exe)
+            });
+        }
+
+        private static void TryInstallKeyboardHook(object kompas, bool showResult)
+        {
+            if (keyboardHook != null)
+            {
+                if (showResult)
+                {
+                    MessageBox.Show("Ctrl+Shift+S is already enabled for this KOMPAS session.", "Bambu Studio");
+                }
+
+                return;
+            }
+
+            try
+            {
+                object application = kompas ?? Marshal.GetActiveObject("KOMPAS.Application.7");
+                keyboardHook = new KeyboardHook(application);
+
+                if (showResult)
+                {
+                    MessageBox.Show("Ctrl+Shift+S is enabled for this KOMPAS session.", "Bambu Studio");
+                }
+            }
+            catch (Exception ex)
+            {
+                keyboardHook = null;
+
+                if (showResult)
+                {
+                    MessageBox.Show("Could not enable KOMPAS shortcut:\n" + ex.Message, "Bambu Studio");
+                }
+            }
+        }
+
+        [ComVisible(true)]
+        [ClassInterface(ClassInterfaceType.None)]
+        public sealed class KeyboardHook : IKompasObjectNotify, IDisposable
+        {
+            private readonly IConnectionPoint connectionPoint;
+            private readonly int cookie;
+            private bool disposed;
+            private DateTime lastRunUtc = DateTime.MinValue;
+
+            public KeyboardHook(object application)
+            {
+                IConnectionPointContainer container = (IConnectionPointContainer)application;
+                Guid eventGuid = typeof(IKompasObjectNotify).GUID;
+                container.FindConnectionPoint(ref eventGuid, out connectionPoint);
+                connectionPoint.Advise(this, out cookie);
+            }
+
+            public bool KeyDown(ref int key, int flags, bool system)
+            {
+                if (key == (int)Keys.S && Control.ModifierKeys == (Keys.Control | Keys.Shift))
+                {
+                    key = 0;
+
+                    DateTime now = DateTime.UtcNow;
+                    if ((now - lastRunUtc).TotalMilliseconds > 750)
+                    {
+                        lastRunUtc = now;
+
+                        try
+                        {
+                            RunExporter("step");
+                        }
+                        catch (Exception ex)
+                        {
+                            MessageBox.Show("KOMPAS Bambu shortcut failed:\n" + ex.Message, "Bambu Studio");
+                        }
+                    }
+
+                    return false;
+                }
+
+                return true;
+            }
+
+            public bool ApplicationDestroy()
+            {
+                Dispose();
+                keyboardHook = null;
+                return true;
+            }
+
+            public void Dispose()
+            {
+                if (!disposed && connectionPoint != null && cookie != 0)
+                {
+                    disposed = true;
+                    connectionPoint.Unadvise(cookie);
+                }
+            }
+        }
+
+        [ComVisible(true)]
+        [Guid("C7CB743A-C59D-4C27-8CB6-971C2A393F2F")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIDispatch)]
+        public interface IKompasObjectNotify
+        {
+            [DispId(5)]
+            bool ApplicationDestroy();
+
+            [DispId(9)]
+            bool KeyDown(ref int key, int flags, bool system);
         }
 
         [ComRegisterFunction]
