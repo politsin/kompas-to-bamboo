@@ -1,5 +1,6 @@
 bin/
 obj/
 dist/
+_sdk_csharp_samples/
 *.user
 *.suo
