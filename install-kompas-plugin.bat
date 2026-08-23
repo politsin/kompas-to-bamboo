@@ -41,7 +41,7 @@ if not exist "%KITDIR%" (
   exit /b 1
 )
 
-copy /y "%KIT_SOURCE%" "%KITCONFIG%" >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-Content -LiteralPath '%KIT_SOURCE%' -Raw | Set-Content -LiteralPath '%KITCONFIG%' -Encoding Unicode"
 if errorlevel 1 (
   echo Failed to write KOMPAS kit config.
   exit /b 1
