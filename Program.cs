@@ -19,6 +19,7 @@ internal sealed class App
         try
         {
             Options options = Options.Parse(args);
+            Log($"Start: {string.Join(" ", args)}");
 
             if (options.ShowHelp)
             {
@@ -26,18 +27,21 @@ internal sealed class App
                 return 0;
             }
 
-            object kompas = Com.GetActiveObject("KOMPAS.Application.7");
-            object document = GetActive3DDocument(kompas);
+            object kompas7 = Com.GetActiveObject("KOMPAS.Application.7");
+            object? kompas5 = Com.TryGetActiveObject("KOMPAS.Application.5");
+            object document = GetActive3DDocument(kompas5 ?? kompas7);
             DocumentInfo documentInfo = GetDocumentInfo(document);
             string exportPath = BuildExportPath(documentInfo, options);
 
-            Export(kompas, document, documentInfo, exportPath, options.Format);
+            Export(kompas7, document, documentInfo, exportPath, options.Format);
             Console.WriteLine($"Exported: {exportPath}");
+            Log($"Exported: {exportPath}");
 
             if (options.OpenBambu)
             {
                 OpenInBambu(exportPath, options.BambuPath);
                 Console.WriteLine("Bambu Studio launched.");
+                Log("Bambu Studio launched.");
             }
 
             return 0;
@@ -46,6 +50,7 @@ internal sealed class App
         {
             Console.Error.WriteLine("kompas-bambu failed:");
             Console.Error.WriteLine(ex.Message);
+            Log("Failed: " + ex);
             return 1;
         }
     }
@@ -221,7 +226,6 @@ internal sealed class App
         object param = CreateAdditionConvertParameters(kompas, kompasFormat);
         Com.TryInvoke(param, "Clear");
 
-        SetParam(param, "Format", kompasFormat);
         SetParam(param, "TopolgyIncluded", true);
         ConfigureExportObjects(param);
 
@@ -334,6 +338,18 @@ internal sealed class App
 
         throw new FileNotFoundException(
             "Bambu Studio executable was not found. Pass --bambu \"path\\to\\bambu-studio.exe\" or set BAMBU_STUDIO_EXE.");
+    }
+
+    private static void Log(string message)
+    {
+        try
+        {
+            string logPath = Path.Combine(Path.GetTempPath(), "kompas-bambu.log");
+            File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+        }
+        catch
+        {
+        }
     }
 }
 
@@ -452,6 +468,18 @@ internal static class Com
         }
 
         return obj;
+    }
+
+    public static object? TryGetActiveObject(string progId)
+    {
+        try
+        {
+            return GetActiveObject(progId);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public static object Invoke(object target, string name, params object?[] args)

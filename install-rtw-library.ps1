@@ -18,6 +18,10 @@ $targetDir = Join-Path $KompasRoot 'Libs\KompasBambu'
 $kitConfigPath = 'C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config'
 $appId = 'APP_KompasBambu'
 $relativeRtwPath = 'KompasBambu\KompasBambu.rtw'
+$legacyConfigPaths = @(
+    'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambu.kit.config',
+    'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambuDummy.kit.config'
+)
 
 if (-not (Test-Path $rtwSource)) {
     throw "RTW file is missing: $rtwSource. Run build-rtw.bat first."
@@ -94,6 +98,26 @@ if ($null -eq $existing) {
 }
 
 $xml.Save($kitConfigPath)
+
+foreach ($legacyConfigPath in $legacyConfigPaths) {
+    Remove-Item -LiteralPath $legacyConfigPath -Force -ErrorAction SilentlyContinue
+}
+
+$userKitConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\kHome.kit.config'
+if (Test-Path $userKitConfigPath) {
+    $userXml = New-Object System.Xml.XmlDocument
+    $userXml.PreserveWhitespace = $true
+    $userXml.Load($userKitConfigPath)
+
+    $duplicateNodes = @($userXml.SelectNodes("//Application[@id='KompasBambu.rtw']"))
+    foreach ($node in $duplicateNodes) {
+        [void]$node.ParentNode.RemoveChild($node)
+    }
+
+    if ($duplicateNodes.Count -gt 0) {
+        $userXml.Save($userKitConfigPath)
+    }
+}
 
 Write-Host "Installed RTW library to $targetDir"
 Write-Host "Registered APP_KompasBambu in $kitConfigPath"
