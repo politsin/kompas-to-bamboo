@@ -2,5 +2,7 @@ bin/
 obj/
 dist/
 _sdk_csharp_samples/
+_sdk_cpp_samples/
+rtw/bin/
 *.user
 *.suo
