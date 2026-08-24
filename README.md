@@ -77,6 +77,21 @@ C#/.NET 8 Windows console app. Делает основную работу:
 %TEMP%\kompas-bambu.log
 ```
 
+## Структура репозитория
+
+Рабочие файлы:
+
+- `Program.cs` - exporter/launcher;
+- `KompasBambu.csproj` - проект .NET exporter;
+- `rtw/KompasBambuRtw.cpp` - native RTW shim;
+- `rtw/KompasBambu.xml` - UI-команды KOMPAS;
+- `build-rtw.bat` - сборка RTW;
+- `install-rtw-library.ps1` - установка RTW-интеграции;
+- `uninstall-rtw-library.ps1` - удаление RTW-интеграции;
+- `README.md` - это описание.
+
+Каталоги `bin`, `obj`, `dist`, `rtw/bin`, `_sdk_*` являются локальными сборочными/справочными артефактами и не версионируются.
+
 ## Сборка
 
 Exporter:
@@ -163,18 +178,3 @@ powershell -ExecutionPolicy Bypass -File .\uninstall-rtw-library.ps1
 ```text
 C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu
 ```
-
-## Старый COM-вариант
-
-В репозитории остался экспериментальный COM/ActiveX plugin:
-
-```text
-plugin\KompasBambuPlugin.cs
-build-plugin.bat
-install-kompas-plugin.bat
-uninstall-kompas-plugin.bat
-```
-
-Он виден KOMPAS на вкладке `ActiveX`, но рабочий и предпочтительный путь сейчас - RTW-приложение. COM-вариант не нужен для текущего workflow `Приложения -> Bambu Studio -> Bambu STEP`.
-
-Также остались исторические dummy/install scripts для проверки механики библиотек KOMPAS. Они не являются частью рабочей установки.
