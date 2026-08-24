@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $rtwSource = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
+$xmlSource = Join-Path $ProjectRoot 'rtw\KompasBambu.xml'
 $exporterFiles = @(
     'kompas-bambu.exe',
     'kompas-bambu.dll',
@@ -21,9 +22,26 @@ $relativeRtwPath = 'KompasBambu\KompasBambu.rtw'
 if (-not (Test-Path $rtwSource)) {
     throw "RTW file is missing: $rtwSource. Run build-rtw.bat first."
 }
+if (-not (Test-Path $xmlSource)) {
+    throw "RTW XML file is missing: $xmlSource."
+}
 
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-Copy-Item -LiteralPath $rtwSource -Destination (Join-Path $targetDir 'KompasBambu.rtw') -Force
+
+$rtwTarget = Join-Path $targetDir 'KompasBambu.rtw'
+if (Test-Path $rtwTarget) {
+    $sourceHash = (Get-FileHash -LiteralPath $rtwSource -Algorithm SHA256).Hash
+    $targetHash = (Get-FileHash -LiteralPath $rtwTarget -Algorithm SHA256).Hash
+    if ($sourceHash -ne $targetHash) {
+        Copy-Item -LiteralPath $rtwSource -Destination $rtwTarget -Force
+    }
+} else {
+    Copy-Item -LiteralPath $rtwSource -Destination $rtwTarget -Force
+}
+
+$xmlTarget = Join-Path $targetDir 'KompasBambu.xml'
+$xmlText = Get-Content -LiteralPath $xmlSource -Raw
+[System.IO.File]::WriteAllText($xmlTarget, $xmlText, [System.Text.Encoding]::Unicode)
 
 foreach ($file in $exporterFiles) {
     $source = Join-Path $ProjectRoot "dist\$file"
