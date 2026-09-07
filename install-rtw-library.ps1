@@ -1,6 +1,7 @@
 param(
     [string]$KompasRoot = 'C:\Program Files\ASCON\KOMPAS-3D v24 Home',
-    [string]$ProjectRoot = $PSScriptRoot
+    [string]$ProjectRoot = $PSScriptRoot,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +24,24 @@ $legacyConfigPaths = @(
     'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambuDummy.kit.config'
 )
 
+if (-not $SkipBuild) {
+    Push-Location $ProjectRoot
+    try {
+        & dotnet publish -c Release -r win-x64 --self-contained false -o dist
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet publish failed with exit code $LASTEXITCODE"
+        }
+
+        & (Join-Path $ProjectRoot 'build-rtw.bat')
+        if ($LASTEXITCODE -ne 0) {
+            throw "build-rtw.bat failed with exit code $LASTEXITCODE"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 if (-not (Test-Path $rtwSource)) {
     throw "RTW file is missing: $rtwSource. Run build-rtw.bat first."
 }
@@ -44,7 +63,8 @@ if (Test-Path $rtwTarget) {
 }
 
 $xmlTarget = Join-Path $targetDir 'KompasBambu.xml'
-$xmlText = Get-Content -LiteralPath $xmlSource -Raw
+$xmlText = Get-Content -LiteralPath $xmlSource -Raw -Encoding UTF8
+$xmlText = [regex]::Replace($xmlText, '^<\?xml[^?]*\?>', '<?xml version="1.0" encoding="utf-16"?>')
 [System.IO.File]::WriteAllText($xmlTarget, $xmlText, [System.Text.Encoding]::Unicode)
 
 foreach ($file in $exporterFiles) {

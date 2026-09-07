@@ -2,6 +2,8 @@
 
 Интеграция KOMPAS-3D v24 Home с Bambu Studio: команда в меню KOMPAS экспортирует активную 3D-деталь/сборку в файл для печати и сразу открывает его в Bambu Studio.
 
+Этот README описывает не только текущий результат, но и рабочий процесс разработки. Важный практический момент: KOMPAS читает не XML из git-репозитория, а установленную копию из своей папки `Libs`. После любого изменения меню или RTW-кода нужно пересобрать проект и переустановить библиотеку.
+
 Рабочая интеграция сейчас сделана как RTW-приложение KOMPAS:
 
 - `KompasBambu.rtw` - нативная 64-битная RTW-библиотека, которую видит меню `Приложения`.
@@ -17,6 +19,7 @@ RTW-библиотека намеренно тонкая: она только п
 - `Приложения -> Bambu Studio -> Bambu STEP`
 - `Приложения -> Bambu Studio -> Bambu STEP — новое окно`
 - `Приложения -> Bambu Studio -> Bambu STL`
+- `Приложения -> Bambu Studio -> Bambu STL — новое окно`
 
 Поведение по умолчанию:
 
@@ -27,7 +30,8 @@ RTW-библиотека намеренно тонкая: она только п
 - имя экспортированного файла совпадает с именем модели;
 - STEP передаёт файл в открытый Bambu Studio (`--single-instance`); если он закрыт, запускает его;
 - STEP — новое окно принудительно запускает отдельное окно (`--no-single-instance`);
-- STL сохраняет прежний запуск без дополнительных флагов и учитывает настройки Bambu Studio.
+- STL передаёт файл в Bambu Studio без дополнительных флагов и учитывает настройки Bambu Studio;
+- STL — новое окно принудительно запускает отдельное окно (`--no-single-instance`).
 
 Для STEP используется штатный механизм Bambu Studio: https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/InstanceCheck.cpp. Открытый экземпляр должен использовать тот же путь к EXE. Если окон несколько, получателя выбирает Bambu Studio.
 
@@ -54,13 +58,14 @@ C:\Users\polit\YandexDisk\3d\...\print\Держалка к стене.step
 - `1` -> `kompas-bambu.exe step`
 - `3` -> `kompas-bambu.exe step --new-window`
 - `2` -> `kompas-bambu.exe stl`
+- `4` -> `kompas-bambu.exe stl --new-window`
 
 `rtw/KompasBambu.xml`
 
 XML-описание приложения для UI KOMPAS. Содержит:
 
 - `<application id="APP_KompasBambu" ...>`;
-- три команды (добавлена `id="3"` для STEP в новом окне): `<appCommand id="1" title="Bambu STEP" />` и `<appCommand id="2" title="Bambu STL" />`;
+- четыре команды: STEP/STL и отдельные варианты открытия в текущем или новом окне Bambu Studio;
 - меню `<menu id="APP_KompasBambu">`;
 - toolbar trays для `m3d_main` и `a3d_main`.
 
@@ -100,6 +105,14 @@ C#/.NET 8 Windows console app. Делает основную работу:
 
 ## Сборка
 
+Предпосылки:
+
+- Windows x64;
+- KOMPAS-3D v24 Home;
+- .NET 8 SDK;
+- MinGW с `g++.exe` в `PATH` или в стандартной папке Scoop `%USERPROFILE%\scoop\apps\mingw\current\bin`;
+- Bambu Studio.
+
 Exporter:
 
 ```powershell
@@ -118,6 +131,8 @@ build-rtw.bat
 rtw\bin\KompasBambu.rtw
 ```
 
+Обычно вручную эти две команды запускать не нужно: `install-rtw-library.ps1` делает это сам перед копированием файлов в KOMPAS.
+
 ## Установка RTW
 
 Основной установщик:
@@ -130,6 +145,8 @@ powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1
 
 Что делает установщик:
 
+- пересобирает exporter через `dotnet publish`;
+- пересобирает RTW через `build-rtw.bat`;
 - копирует `KompasBambu.rtw`, `KompasBambu.xml` и файлы `kompas-bambu.exe` в:
 
 ```text
@@ -153,6 +170,63 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 
 После установки нужно перезапустить KOMPAS.
 
+Если KOMPAS открыт во время установки, он может держать старую RTW-библиотеку загруженной. Надежный порядок такой:
+
+1. Закрыть KOMPAS.
+2. Запустить `install-rtw-library.ps1` от администратора.
+3. Открыть KOMPAS.
+4. Проверить меню `Приложения -> Bambu Studio`.
+
+Если менялись команды меню, проверять надо не только файлы в git, а установленную копию:
+
+```powershell
+Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBambu.xml"
+```
+
+Именно этот XML читает KOMPAS. Если в репозитории уже есть новые `<appCommand>`/`<appItem>`, а в установленном XML их нет, значит после изменений не запускали `install-rtw-library.ps1` или установка не смогла перезаписать файлы. После изменения `rtw/KompasBambuRtw.cpp` надо также убедиться, что обновился установленный `KompasBambu.rtw`; если KOMPAS держит RTW-файл открытым, закрой KOMPAS и повтори установку.
+
+Быстрая проверка установленного состояния:
+
+```powershell
+$lib = "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu"
+Select-String -Path "$lib\KompasBambu.xml" -Pattern "appCommand|appItem|Bambu"
+Get-Item "$lib\KompasBambu.rtw", "$lib\kompas-bambu.exe" | Select-Object FullName, Length, LastWriteTime
+```
+
+Для текущей версии в установленном XML должны быть четыре команды:
+
+```xml
+<appCommand id="1" productID="APP_KompasBambu" title="Bambu STEP" />
+<appCommand id="3" productID="APP_KompasBambu" title="Bambu STEP — новое окно" />
+<appCommand id="2" productID="APP_KompasBambu" title="Bambu STL" />
+<appCommand id="4" productID="APP_KompasBambu" title="Bambu STL — новое окно" />
+```
+
+Если повышенный PowerShell не видит `g++.exe`, можно сначала собрать RTW обычной консолью, а затем установить уже собранные файлы:
+
+```powershell
+.\build-rtw.bat
+powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1 -SkipBuild
+```
+
+`-SkipBuild` нужен только как обход проблем окружения. Для обычной разработки лучше запускать установщик без него, чтобы установленная библиотека точно соответствовала исходникам.
+
+## Как добавлять новые команды
+
+Для нового пункта меню нужно менять две части синхронно:
+
+1. `rtw/KompasBambu.xml` - добавить новый `<appCommand id="...">` и включить этот id в нужные `<appItem>`.
+2. `rtw/KompasBambuRtw.cpp` - добавить такой же id в `LIBRARYENTRY` и передать нужные аргументы в `kompas-bambu.exe`.
+
+После этого обязательная проверка:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1
+Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBambu.xml"
+```
+
+Если забыть второй шаг, пункт появится в меню, но будет делать не то действие. Если забыть переустановку, в KOMPAS вообще не появится новый пункт, даже если git-версия уже правильная.
+
 ## Ручной запуск
 
 Ту же логику можно проверить без меню KOMPAS:
@@ -167,6 +241,7 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 .\dist\kompas-bambu.exe step
 .\dist\kompas-bambu.exe step --new-window
 .\dist\kompas-bambu.exe stl
+.\dist\kompas-bambu.exe stl --new-window
 .\dist\kompas-bambu.exe step export
 .\dist\kompas-bambu.exe step --out-dir print
 .\dist\kompas-bambu.exe step --bambu "C:\Program Files\Bambu Studio\bambu-studio.exe"

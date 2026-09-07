@@ -77,6 +77,7 @@ extern "C" __declspec(dllexport) void __stdcall LIBRARYENTRY(unsigned int comman
     case 1: runExporter(L"step"); break;
     case 3: runExporter(L"step --new-window"); break;
     case 2: runExporter(L"stl"); break;
+    case 4: runExporter(L"stl --new-window"); break;
     default: break;
     }
 }
