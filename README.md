@@ -15,6 +15,7 @@ RTW-библиотека намеренно тонкая: она только п
 Команды в KOMPAS:
 
 - `Приложения -> Bambu Studio -> Bambu STEP`
+- `Приложения -> Bambu Studio -> Bambu STEP — новое окно`
 - `Приложения -> Bambu Studio -> Bambu STL`
 
 Поведение по умолчанию:
@@ -24,7 +25,11 @@ RTW-библиотека намеренно тонкая: она только п
 - экспортируются только тела;
 - результат кладется в папку `print` рядом с исходным файлом KOMPAS;
 - имя экспортированного файла совпадает с именем модели;
-- после экспорта запускается Bambu Studio с этим файлом.
+- STEP передаёт файл в открытый Bambu Studio (`--single-instance`); если он закрыт, запускает его;
+- STEP — новое окно принудительно запускает отдельное окно (`--no-single-instance`);
+- STL сохраняет прежний запуск без дополнительных флагов и учитывает настройки Bambu Studio.
+
+Для STEP используется штатный механизм Bambu Studio: https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/InstanceCheck.cpp. Открытый экземпляр должен использовать тот же путь к EXE. Если окон несколько, получателя выбирает Bambu Studio.
 
 Пример результата:
 
@@ -47,6 +52,7 @@ C:\Users\polit\YandexDisk\3d\...\print\Держалка к стене.step
 `LIBRARYENTRY` мапит команды так:
 
 - `1` -> `kompas-bambu.exe step`
+- `3` -> `kompas-bambu.exe step --new-window`
 - `2` -> `kompas-bambu.exe stl`
 
 `rtw/KompasBambu.xml`
@@ -54,7 +60,7 @@ C:\Users\polit\YandexDisk\3d\...\print\Держалка к стене.step
 XML-описание приложения для UI KOMPAS. Содержит:
 
 - `<application id="APP_KompasBambu" ...>`;
-- две команды `<appCommand id="1" title="Bambu STEP" />` и `<appCommand id="2" title="Bambu STL" />`;
+- три команды (добавлена `id="3"` для STEP в новом окне): `<appCommand id="1" title="Bambu STEP" />` и `<appCommand id="2" title="Bambu STL" />`;
 - меню `<menu id="APP_KompasBambu">`;
 - toolbar trays для `m3d_main` и `a3d_main`.
 
@@ -159,6 +165,7 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 
 ```powershell
 .\dist\kompas-bambu.exe step
+.\dist\kompas-bambu.exe step --new-window
 .\dist\kompas-bambu.exe stl
 .\dist\kompas-bambu.exe step export
 .\dist\kompas-bambu.exe step --out-dir print

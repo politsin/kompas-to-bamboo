@@ -39,9 +39,9 @@ internal sealed class App
 
             if (options.OpenBambu)
             {
-                OpenInBambu(exportPath, options.BambuPath);
-                Console.WriteLine("Bambu Studio launched.");
-                Log("Bambu Studio launched.");
+                OpenInBambu(exportPath, options);
+                Console.WriteLine("File sent to Bambu Studio.");
+                Log("File sent to Bambu Studio.");
             }
 
             return 0;
@@ -305,17 +305,25 @@ internal sealed class App
         throw new InvalidOperationException($"Failed to set KOMPAS export parameter '{name}'.");
     }
 
-    private static void OpenInBambu(string filePath, string? configuredPath)
+    private static void OpenInBambu(string filePath, Options options)
     {
-        string bambuPath = ResolveBambuPath(configuredPath);
+        string bambuPath = ResolveBambuPath(options.BambuPath);
 
-        Process.Start(new ProcessStartInfo
+        var startInfo = new ProcessStartInfo
         {
             FileName = bambuPath,
-            ArgumentList = { filePath },
+
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(bambuPath) ?? Environment.CurrentDirectory
-        });
+        };
+        // Use Bambu's native IPC; STL retains its original launch arguments.
+        if (options.NewWindow)
+            startInfo.ArgumentList.Add("--no-single-instance");
+        else if (options.Format == ExportFormat.Step)
+            startInfo.ArgumentList.Add("--single-instance");
+        startInfo.ArgumentList.Add(filePath);
+        Log($"Bambu arguments: {string.Join(" ", startInfo.ArgumentList)}");
+        using var process = Process.Start(startInfo);
     }
 
     private static string ResolveBambuPath(string? configuredPath)
@@ -366,12 +374,14 @@ internal sealed record Options(
     bool OpenBambu,
     string? BambuPath,
     string OutputFolderName,
-    bool ShowHelp)
+    bool ShowHelp,
+    bool NewWindow = false)
 {
     public static Options Parse(string[] args)
     {
         ExportFormat format = ExportFormat.Step;
         bool openBambu = true;
+        bool newWindow = false;
         string? bambuPath = null;
         string outputFolderName = "print";
 
@@ -384,6 +394,9 @@ internal sealed record Options(
                 case "step":
                 case "--step":
                     format = ExportFormat.Step;
+                    break;
+                case "--new-window":
+                    newWindow = true;
                     break;
                 case "stl":
                 case "--stl":
@@ -406,13 +419,13 @@ internal sealed record Options(
                 case "-h":
                 case "--help":
                 case "/?":
-                    return new Options(format, openBambu, bambuPath, outputFolderName, ShowHelp: true);
+                    return new Options(format, openBambu, bambuPath, outputFolderName, ShowHelp: true, NewWindow: newWindow);
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
             }
         }
 
-        return new Options(format, openBambu, bambuPath, outputFolderName, ShowHelp: false);
+        return new Options(format, openBambu, bambuPath, outputFolderName, ShowHelp: false, NewWindow: newWindow);
     }
 
     public static void PrintHelp()
@@ -421,15 +434,16 @@ internal sealed record Options(
         kompas-bambu
 
         Usage:
-          kompas-bambu [step|stl] [open|export] [--out-dir <name>] [--bambu <path>]
+          kompas-bambu [step|stl] [--new-window] [open|export] [--out-dir <name>] [--bambu <path>]
 
         Defaults:
           format: step, STEP AP203
           output: <KOMPAS file folder>\print\<same-name>.step
-          action: open in Bambu Studio after export
+          action: STEP reuses Bambu Studio; STL follows Bambu preferences
 
         Examples:
           kompas-bambu
+          kompas-bambu step --new-window
           kompas-bambu stl
           kompas-bambu step export
           kompas-bambu step --out-dir print

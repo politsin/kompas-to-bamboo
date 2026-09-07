@@ -73,7 +73,12 @@ extern "C" __declspec(dllexport) unsigned int __stdcall LIBRARYID()
 
 extern "C" __declspec(dllexport) void __stdcall LIBRARYENTRY(unsigned int command)
 {
-    runExporter(command == 2 ? L"stl" : L"step");
+    switch (command) {
+    case 1: runExporter(L"step"); break;
+    case 3: runExporter(L"step --new-window"); break;
+    case 2: runExporter(L"stl"); break;
+    default: break;
+    }
 }
 
 BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID)

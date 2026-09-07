@@ -2,12 +2,14 @@
 <application id="APP_KompasBambu" libName="Bambu Studio" title="Bambu Studio" autostart="false" showInMenu="true">
 
   <appCommand id="1" productID="APP_KompasBambu" title="Bambu STEP" />
+  <appCommand id="3" productID="APP_KompasBambu" title="Bambu STEP — новое окно" />
   <appCommand id="2" productID="APP_KompasBambu" title="Bambu STL" />
 
   <toolBarSet id="KompasBambu_toolBarSetM3D" title="Bambu Studio">
     <toolBar id="SYSTEM" />
     <toolBar id="KompasBambu_InstrumentsM3D" title="Bambu Studio" columnsCount="1">
       <appCommand id="1" />
+      <appCommand id="3" />
       <appCommand id="2" />
     </toolBar>
   </toolBarSet>
@@ -16,6 +18,7 @@
     <toolBar id="SYSTEM" />
     <toolBar id="KompasBambu_InstrumentsA3D" title="Bambu Studio" columnsCount="1">
       <appCommand id="1" />
+      <appCommand id="3" />
       <appCommand id="2" />
     </toolBar>
   </toolBarSet>
@@ -30,6 +33,7 @@
 
   <menu id="APP_KompasBambu">
     <appItem id="1" />
+    <appItem id="3" />
     <appItem id="2" />
   </menu>
 
