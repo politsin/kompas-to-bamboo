@@ -11,6 +11,7 @@ internal sealed class App
     private const string DefaultBambuPath = @"C:\Program Files\Bambu Studio\bambu-studio.exe";
     private const string DefaultOutputFolderName = "print";
     private const string DefaultLaserOutputFolderName = "laser";
+    private const string DefaultAllSketchesOutputFolderName = "dfx";
     private const short FormatStep = 3;
     private const short FormatStl = 6;
     private const int StepAp203 = 203;
@@ -49,11 +50,38 @@ internal sealed class App
             if (options.SketchDxf)
             {
                 object kompasApi5 = kompas5 ?? throw new InvalidOperationException("KOMPAS API5 is required for sketch DXF export.");
-                string dxfExportPath = BuildSketchDxfPath(documentInfo, options, document);
-                SketchExportStats stats = ExportSketchDxf(kompasApi5, document, documentInfo, dxfExportPath);
+                object sketch = FindSketch(document);
+                string dxfExportPath = BuildSketchDxfPath(documentInfo, options, sketch);
+                SketchExportStats stats = ExportSketchDxf(kompasApi5, sketch, documentInfo, dxfExportPath);
                 Console.WriteLine($"Exported: {dxfExportPath}");
                 Console.WriteLine($"Copied curves: {stats.Copied}, skipped: {stats.Skipped}");
                 Log($"Exported sketch DXF: {dxfExportPath}. Copied={stats.Copied}, skipped={stats.Skipped}");
+                return 0;
+            }
+
+            if (options.AllSketchesDxf)
+            {
+                object kompasApi5 = kompas5 ?? throw new InvalidOperationException("KOMPAS API5 is required for sketch DXF export.");
+                List<object> sketches = FindAllSketches(document);
+                string exportDirectory = BuildSketchDxfDirectory(documentInfo, options);
+                int exported = 0;
+                int copied = 0;
+                int skipped = 0;
+
+                for (int i = 0; i < sketches.Count; i++)
+                {
+                    object sketch = sketches[i];
+                    string dxfExportPath = BuildSketchDxfPath(documentInfo, exportDirectory, sketch, i + 1);
+                    SketchExportStats stats = ExportSketchDxf(kompasApi5, sketch, documentInfo, dxfExportPath);
+                    exported++;
+                    copied += stats.Copied;
+                    skipped += stats.Skipped;
+                    Console.WriteLine($"Exported: {dxfExportPath}");
+                    Console.WriteLine($"  Copied curves: {stats.Copied}, skipped: {stats.Skipped}");
+                }
+
+                Console.WriteLine($"Exported sketches: {exported}. Copied curves: {copied}, skipped: {skipped}");
+                Log($"Exported all sketch DXF files to {exportDirectory}. Sketches={exported}, copied={copied}, skipped={skipped}");
                 return 0;
             }
 
@@ -135,17 +163,27 @@ internal sealed class App
         return Path.Combine(exportDirectory, $"{safeName}{extension}");
     }
 
-    private static string BuildSketchDxfPath(DocumentInfo documentInfo, Options options, object document)
+    private static string BuildSketchDxfDirectory(DocumentInfo documentInfo, Options options)
     {
         string outputFolderName = string.IsNullOrWhiteSpace(options.OutputFolderName)
-            ? DefaultLaserOutputFolderName
+            ? (options.AllSketchesDxf ? DefaultAllSketchesOutputFolderName : DefaultLaserOutputFolderName)
             : options.OutputFolderName;
         string exportDirectory = Path.Combine(documentInfo.Directory, SanitizeFolderName(outputFolderName));
 
         Directory.CreateDirectory(exportDirectory);
+        return exportDirectory;
+    }
 
-        string sketchName = SanitizeFileName(GetSketchName(FindSketch(document), fallback: "sketch"));
-        return Path.Combine(exportDirectory, $"{SanitizeFileName(documentInfo.Name)}-{sketchName}.dxf");
+    private static string BuildSketchDxfPath(DocumentInfo documentInfo, Options options, object sketch)
+    {
+        return BuildSketchDxfPath(documentInfo, BuildSketchDxfDirectory(documentInfo, options), sketch, null);
+    }
+
+    private static string BuildSketchDxfPath(DocumentInfo documentInfo, string exportDirectory, object sketch, int? index)
+    {
+        string sketchName = SanitizeFileName(GetSketchName(sketch, fallback: index is null ? "sketch" : $"sketch-{index.Value}"));
+        string prefix = index is null ? string.Empty : $"{index.Value:00}-";
+        return Path.Combine(exportDirectory, $"{prefix}{SanitizeFileName(documentInfo.Name)}-{sketchName}.dxf");
     }
 
     private static string SanitizeFileName(string value)
@@ -344,9 +382,8 @@ internal sealed class App
         throw new InvalidOperationException($"Failed to set KOMPAS export parameter '{name}'.");
     }
 
-    private static SketchExportStats ExportSketchDxf(object kompas5, object document, DocumentInfo documentInfo, string exportPath)
+    private static SketchExportStats ExportSketchDxf(object kompas5, object sketch, DocumentInfo documentInfo, string exportPath)
     {
-        object sketch = FindSketch(document);
         string sketchName = GetSketchName(sketch, fallback: "sketch");
         object sketchDefinition = Com.Invoke(sketch, "GetDefinition");
         object? source2D = Com.TryInvoke(sketchDefinition, "BeginEditEx", true)
@@ -419,6 +456,25 @@ internal sealed class App
         }
 
         return Com.Invoke(sketches, "GetByIndex", 0);
+    }
+
+    private static List<object> FindAllSketches(object document)
+    {
+        object topPart = Com.Invoke(document, "GetPart", TopPart);
+        object sketches = Com.Invoke(topPart, "EntityCollection", Obj3dSketch);
+        int count = Convert.ToInt32(Com.Invoke(sketches, "GetCount"), CultureInfo.InvariantCulture);
+        if (count <= 0)
+        {
+            throw new InvalidOperationException("No sketches found. Create at least one sketch first.");
+        }
+
+        var result = new List<object>(count);
+        for (int i = 0; i < count; i++)
+        {
+            result.Add(Com.Invoke(sketches, "GetByIndex", i));
+        }
+
+        return result;
     }
 
     private static object? FindSelectedSketch(object document)
@@ -684,6 +740,7 @@ internal sealed record Options(
     string OutputFolderName,
     bool ShowHelp,
     bool SketchDxf,
+    bool AllSketchesDxf,
     bool NewWindow = false)
 {
     public static Options Parse(string[] args)
@@ -692,6 +749,7 @@ internal sealed record Options(
         bool openBambu = true;
         bool newWindow = false;
         bool sketchDxf = false;
+        bool allSketchesDxf = false;
         string? bambuPath = null;
         string? outputFolderName = null;
 
@@ -719,6 +777,17 @@ internal sealed record Options(
                 case "--dxf-sketch":
                 case "--sketch-dxf":
                     sketchDxf = true;
+                    allSketchesDxf = false;
+                    openBambu = false;
+                    break;
+                case "all-dxf":
+                case "--all-dxf":
+                case "dxf-all-sketches":
+                case "all-sketches-dxf":
+                case "--dxf-all-sketches":
+                case "--all-sketches-dxf":
+                    allSketchesDxf = true;
+                    sketchDxf = false;
                     openBambu = false;
                     break;
                 case "export":
@@ -742,9 +811,10 @@ internal sealed record Options(
                         format,
                         openBambu,
                         bambuPath,
-                        outputFolderName ?? (sketchDxf ? "laser" : "print"),
+                        outputFolderName ?? (allSketchesDxf ? "dfx" : sketchDxf ? "laser" : "print"),
                         ShowHelp: true,
                         SketchDxf: sketchDxf,
+                        AllSketchesDxf: allSketchesDxf,
                         NewWindow: newWindow);
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
@@ -755,9 +825,10 @@ internal sealed record Options(
             format,
             openBambu,
             bambuPath,
-            outputFolderName ?? (sketchDxf ? "laser" : "print"),
+            outputFolderName ?? (allSketchesDxf ? "dfx" : sketchDxf ? "laser" : "print"),
             ShowHelp: false,
             SketchDxf: sketchDxf,
+            AllSketchesDxf: allSketchesDxf,
             NewWindow: newWindow);
     }
 
@@ -769,18 +840,21 @@ internal sealed record Options(
         Usage:
           kompas-bambu [step|stl] [--new-window] [open|export] [--out-dir <name>] [--bambu <path>]
           kompas-bambu dxf-sketch [--out-dir <name>]
+          kompas-bambu all-sketches-dxf [--out-dir <name>]
 
         Defaults:
           format: step, STEP AP203
           output: <KOMPAS file folder>\print\<same-name>.step
           action: STEP reuses Bambu Studio; STL follows Bambu preferences
           dxf-sketch output: <KOMPAS file folder>\laser\<model>-<sketch>.dxf
+          all-sketches-dxf output: <KOMPAS file folder>\dfx\NN-<model>-<sketch>.dxf
 
         Examples:
           kompas-bambu
           kompas-bambu step --new-window
           kompas-bambu stl
           kompas-bambu dxf-sketch
+          kompas-bambu all-sketches-dxf
           kompas-bambu step export
           kompas-bambu step --out-dir print
           kompas-bambu step --bambu "C:\Program Files\Bambu Studio\bambu-studio.exe"

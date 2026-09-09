@@ -79,6 +79,7 @@ extern "C" __declspec(dllexport) void __stdcall LIBRARYENTRY(unsigned int comman
     case 2: runExporter(L"stl"); break;
     case 4: runExporter(L"stl --new-window"); break;
     case 5: runExporter(L"dxf-sketch"); break;
+    case 6: runExporter(L"all-sketches-dxf"); break;
     default: break;
     }
 }
