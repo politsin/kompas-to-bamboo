@@ -10,7 +10,7 @@
 - `KompasBambu.xml` - описание команд меню/панелей для KOMPAS.
 - `kompas-bambu.exe` - .NET exporter/launcher, который делает реальный экспорт через COM API KOMPAS и запускает Bambu Studio.
 
-RTW-библиотека намеренно тонкая: она только получает команду KOMPAS и запускает `kompas-bambu.exe step` или `kompas-bambu.exe stl`. Вся CAD-логика лежит в C# exporter, чтобы не тащить экспорт STEP/STL в C++ RTW-код.
+RTW-библиотека намеренно тонкая: она только получает команду KOMPAS и запускает `kompas-bambu.exe` с нужным режимом (`step`, `stl`, `dxf-sketch`). Вся CAD-логика лежит в C# exporter, чтобы не тащить экспорт STEP/STL/DXF в C++ RTW-код.
 
 ## Что умеет
 
@@ -20,6 +20,7 @@ RTW-библиотека намеренно тонкая: она только п
 - `Приложения -> Bambu Studio -> Bambu STEP — новое окно`
 - `Приложения -> Bambu Studio -> Bambu STL`
 - `Приложения -> Bambu Studio -> Bambu STL — новое окно`
+- `Приложения -> Bambu Studio -> Laser DXF`
 
 Поведение по умолчанию:
 
@@ -32,6 +33,7 @@ RTW-библиотека намеренно тонкая: она только п
 - STEP — новое окно принудительно запускает отдельное окно (`--no-single-instance`);
 - STL передаёт файл в Bambu Studio без дополнительных флагов и учитывает настройки Bambu Studio;
 - STL — новое окно принудительно запускает отдельное окно (`--no-single-instance`).
+- `Laser DXF` экспортирует выбранный эскиз, либо первый эскиз верхней детали, в DXF для лазерной резки.
 
 Для STEP используется штатный механизм Bambu Studio: https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/InstanceCheck.cpp. Открытый экземпляр должен использовать тот же путь к EXE. Если окон несколько, получателя выбирает Bambu Studio.
 
@@ -42,6 +44,21 @@ C:\Users\polit\YandexDisk\3d\...\print\Держалка к стене.step
 ```
 
 Активный документ должен быть сохранен хотя бы один раз: папка `print` создается рядом с файлом детали/сборки.
+
+Для лазера результат пишется отдельно:
+
+```text
+C:\Users\polit\YandexDisk\3d\...\laser\Деталь-Эскиз1.dxf
+```
+
+DXF-экспорт эскиза фильтрует геометрию под резку:
+
+- берутся только 2D-кривые со стилем `1`, то есть основная линия KOMPAS;
+- тонкие/вспомогательные линии со стилем `2` не попадают в DXF;
+- сейчас копируются отрезки, окружности и дуги;
+- сплайны, эллипсы, размеры, текст, осевые и прочие неподдержанные объекты пропускаются.
+
+Исходный эскиз не редактируется: exporter открывает его как 2D-документ, считывает поддержанные кривые, создает временный 2D-фрагмент и сохраняет уже этот временный фрагмент через `ksSaveToDXF`.
 
 ## Архитектура
 
@@ -59,13 +76,14 @@ C:\Users\polit\YandexDisk\3d\...\print\Держалка к стене.step
 - `3` -> `kompas-bambu.exe step --new-window`
 - `2` -> `kompas-bambu.exe stl`
 - `4` -> `kompas-bambu.exe stl --new-window`
+- `5` -> `kompas-bambu.exe dxf-sketch`
 
 `rtw/KompasBambu.xml`
 
 XML-описание приложения для UI KOMPAS. Содержит:
 
 - `<application id="APP_KompasBambu" ...>`;
-- четыре команды: STEP/STL и отдельные варианты открытия в текущем или новом окне Bambu Studio;
+- пять команд: STEP/STL и отдельные варианты открытия в текущем или новом окне Bambu Studio, плюс DXF эскиза для лазерной резки;
 - меню `<menu id="APP_KompasBambu">`;
 - toolbar trays для `m3d_main` и `a3d_main`.
 
@@ -81,6 +99,16 @@ C#/.NET 8 Windows console app. Делает основную работу:
 - экспортирует через API5 `AdditionFormatParam` + `SaveAsToAdditionFormat`;
 - использует API7 converter/document path как fallback;
 - запускает Bambu Studio.
+
+В режиме `dxf-sketch` exporter:
+
+- получает эскиз через `ksDocument3D.GetSelectionMng()`; если выбранного эскиза нет, берет первый `o3d_sketch` из `GetPart(pTop_Part).EntityCollection(o3d_sketch)`;
+- открывает эскиз через `ksSketchDefinition.BeginEditEx(true)` или fallback `BeginEdit()`;
+- проходит объекты 2D-итератором `GetIterator().ksCreateIterator(ALL_OBJ, 0)`;
+- читает стиль через `ksDocument2D.ksGetObjectStyle(ref)` и оставляет только основной стиль `1`; тонкий стиль `2` отбрасывается;
+- читает параметры через `ksGetObjParam` и структуры `ko_LineSegParam`, `ko_CircleParam`, `ko_ArcByAngleParam`;
+- создает временный фрагмент `lt_DocFragment`;
+- сохраняет его в DXF через `ksDocument2D.ksSaveToDXF(path)`.
 
 Лог последнего запуска пишется в:
 
@@ -193,13 +221,14 @@ Select-String -Path "$lib\KompasBambu.xml" -Pattern "appCommand|appItem|Bambu"
 Get-Item "$lib\KompasBambu.rtw", "$lib\kompas-bambu.exe" | Select-Object FullName, Length, LastWriteTime
 ```
 
-Для текущей версии в установленном XML должны быть четыре команды:
+Для текущей версии в установленном XML должны быть пять команд:
 
 ```xml
 <appCommand id="1" productID="APP_KompasBambu" title="Bambu STEP" />
 <appCommand id="3" productID="APP_KompasBambu" title="Bambu STEP — новое окно" />
 <appCommand id="2" productID="APP_KompasBambu" title="Bambu STL" />
 <appCommand id="4" productID="APP_KompasBambu" title="Bambu STL — новое окно" />
+<appCommand id="5" productID="APP_KompasBambu" title="Laser DXF" />
 ```
 
 Если повышенный PowerShell не видит `g++.exe`, можно сначала собрать RTW обычной консолью, а затем установить уже собранные файлы:
@@ -242,8 +271,10 @@ Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBa
 .\dist\kompas-bambu.exe step --new-window
 .\dist\kompas-bambu.exe stl
 .\dist\kompas-bambu.exe stl --new-window
+.\dist\kompas-bambu.exe dxf-sketch
 .\dist\kompas-bambu.exe step export
 .\dist\kompas-bambu.exe step --out-dir print
+.\dist\kompas-bambu.exe dxf-sketch --out-dir laser
 .\dist\kompas-bambu.exe step --bambu "C:\Program Files\Bambu Studio\bambu-studio.exe"
 ```
 

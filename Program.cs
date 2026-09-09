@@ -10,9 +10,23 @@ internal sealed class App
 {
     private const string DefaultBambuPath = @"C:\Program Files\Bambu Studio\bambu-studio.exe";
     private const string DefaultOutputFolderName = "print";
+    private const string DefaultLaserOutputFolderName = "laser";
     private const short FormatStep = 3;
     private const short FormatStl = 6;
     private const int StepAp203 = 203;
+    private const int TopPart = -1;
+    private const int Obj3dSketch = 5;
+    private const int DocFragment = 3;
+    private const int All2DObjects = 0;
+    private const int LineSegObj = 1;
+    private const int CircleObj = 2;
+    private const int ArcObj = 3;
+    private const int BasicLineStyle = 1;
+    private const int AllParam = -1;
+    private const int KoLineSegParam = 11;
+    private const int KoArcByAngleParam = 12;
+    private const int KoCircleParam = 20;
+    private const int KoDocumentParam = 35;
 
     public int Run(string[] args)
     {
@@ -31,6 +45,18 @@ internal sealed class App
             object? kompas5 = Com.TryGetActiveObject("KOMPAS.Application.5");
             object document = GetActive3DDocument(kompas5 ?? kompas7);
             DocumentInfo documentInfo = GetDocumentInfo(document);
+
+            if (options.SketchDxf)
+            {
+                object kompasApi5 = kompas5 ?? throw new InvalidOperationException("KOMPAS API5 is required for sketch DXF export.");
+                string dxfExportPath = BuildSketchDxfPath(documentInfo, options, document);
+                SketchExportStats stats = ExportSketchDxf(kompasApi5, document, documentInfo, dxfExportPath);
+                Console.WriteLine($"Exported: {dxfExportPath}");
+                Console.WriteLine($"Copied curves: {stats.Copied}, skipped: {stats.Skipped}");
+                Log($"Exported sketch DXF: {dxfExportPath}. Copied={stats.Copied}, skipped={stats.Skipped}");
+                return 0;
+            }
+
             string exportPath = BuildExportPath(documentInfo, options);
 
             Export(kompas7, document, documentInfo, exportPath, options.Format);
@@ -107,6 +133,19 @@ internal sealed class App
         Directory.CreateDirectory(exportDirectory);
 
         return Path.Combine(exportDirectory, $"{safeName}{extension}");
+    }
+
+    private static string BuildSketchDxfPath(DocumentInfo documentInfo, Options options, object document)
+    {
+        string outputFolderName = string.IsNullOrWhiteSpace(options.OutputFolderName)
+            ? DefaultLaserOutputFolderName
+            : options.OutputFolderName;
+        string exportDirectory = Path.Combine(documentInfo.Directory, SanitizeFolderName(outputFolderName));
+
+        Directory.CreateDirectory(exportDirectory);
+
+        string sketchName = SanitizeFileName(GetSketchName(FindSketch(document), fallback: "sketch"));
+        return Path.Combine(exportDirectory, $"{SanitizeFileName(documentInfo.Name)}-{sketchName}.dxf");
     }
 
     private static string SanitizeFileName(string value)
@@ -305,6 +344,244 @@ internal sealed class App
         throw new InvalidOperationException($"Failed to set KOMPAS export parameter '{name}'.");
     }
 
+    private static SketchExportStats ExportSketchDxf(object kompas5, object document, DocumentInfo documentInfo, string exportPath)
+    {
+        object sketch = FindSketch(document);
+        string sketchName = GetSketchName(sketch, fallback: "sketch");
+        object sketchDefinition = Com.Invoke(sketch, "GetDefinition");
+        object? source2D = Com.TryInvoke(sketchDefinition, "BeginEditEx", true)
+            ?? Com.TryInvoke(sketchDefinition, "BeginEdit");
+
+        if (source2D is null)
+        {
+            throw new InvalidOperationException($"Failed to open sketch '{sketchName}' for reading.");
+        }
+
+        List<SketchCurve> curves;
+        int skipped;
+        try
+        {
+            curves = ReadBasicSketchCurves(kompas5, source2D, out skipped);
+        }
+        finally
+        {
+            Com.TryInvokeMethod(sketchDefinition, "EndEdit");
+        }
+
+        if (curves.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Sketch '{sketchName}' has no supported basic-style curves for laser DXF export. " +
+                "Use main-line segments/circles/arcs, or keep unsupported curves out of this first exporter version.");
+        }
+
+        object target2D = CreateTemporaryFragmentDocument(kompas5, documentInfo, exportPath);
+        try
+        {
+            foreach (SketchCurve curve in curves)
+            {
+                curve.Draw(target2D);
+            }
+
+            object result = Com.Invoke(target2D, "ksSaveToDXF", exportPath);
+            if (result is bool ok && !ok)
+            {
+                throw new InvalidOperationException($"KOMPAS returned false while saving DXF: {exportPath}");
+            }
+
+            if (!File.Exists(exportPath) || new FileInfo(exportPath).Length == 0)
+            {
+                throw new InvalidOperationException($"DXF file was not created or is empty: {exportPath}");
+            }
+        }
+        finally
+        {
+            Com.TryInvokeMethod(target2D, "ksCloseDocument");
+        }
+
+        return new SketchExportStats(curves.Count, skipped);
+    }
+
+    private static object FindSketch(object document)
+    {
+        object? selected = FindSelectedSketch(document);
+        if (selected is not null)
+        {
+            return selected;
+        }
+
+        object topPart = Com.Invoke(document, "GetPart", TopPart);
+        object sketches = Com.Invoke(topPart, "EntityCollection", Obj3dSketch);
+        int count = Convert.ToInt32(Com.Invoke(sketches, "GetCount"), CultureInfo.InvariantCulture);
+        if (count <= 0)
+        {
+            throw new InvalidOperationException("No sketch found. Select a sketch in the model tree or create one first.");
+        }
+
+        return Com.Invoke(sketches, "GetByIndex", 0);
+    }
+
+    private static object? FindSelectedSketch(object document)
+    {
+        object? selection = Com.TryInvoke(document, "GetSelectionMng")
+            ?? Com.TryGet(document, "SelectionManager")
+            ?? Com.TryGet(document, "SelectionMng");
+
+        if (selection is null)
+        {
+            return null;
+        }
+
+        int count = Convert.ToInt32(Com.Invoke(selection, "GetCount"), CultureInfo.InvariantCulture);
+        for (int i = 0; i < count; i++)
+        {
+            int type = Convert.ToInt32(Com.Invoke(selection, "GetObjectType", i), CultureInfo.InvariantCulture);
+            if (type != Obj3dSketch)
+            {
+                continue;
+            }
+
+            object? selected = Com.TryInvoke(selection, "GetObjectByIndex", i);
+            if (selected is not null)
+            {
+                return selected;
+            }
+        }
+
+        return null;
+    }
+
+    private static string GetSketchName(object sketch, string fallback)
+    {
+        string? name = Com.TryGetString(sketch, "name")
+            ?? Com.TryGetString(sketch, "Name")
+            ?? Com.TryInvokeString(sketch, "GetName");
+
+        return string.IsNullOrWhiteSpace(name) ? fallback : name;
+    }
+
+    private static List<SketchCurve> ReadBasicSketchCurves(object kompas5, object source2D, out int skipped)
+    {
+        var curves = new List<SketchCurve>();
+        skipped = 0;
+
+        object iterator = Com.Invoke(kompas5, "GetIterator");
+        try
+        {
+            object created = Com.Invoke(iterator, "ksCreateIterator", All2DObjects, 0);
+            if (created is bool ok && !ok)
+            {
+                throw new InvalidOperationException("KOMPAS failed to create a 2D object iterator.");
+            }
+
+            int obj = Convert.ToInt32(Com.Invoke(iterator, "ksMoveIterator", "F"), CultureInfo.InvariantCulture);
+            while (Convert.ToInt32(Com.Invoke(source2D, "ksExistObj", obj), CultureInfo.InvariantCulture) == 1)
+            {
+                if (!TryReadSupportedBasicCurve(kompas5, source2D, obj, out SketchCurve? curve))
+                {
+                    skipped++;
+                }
+                else
+                {
+                    curves.Add(curve!);
+                }
+
+                obj = Convert.ToInt32(Com.Invoke(iterator, "ksMoveIterator", "N"), CultureInfo.InvariantCulture);
+            }
+        }
+        finally
+        {
+            Com.TryInvokeMethod(iterator, "ksDeleteIterator");
+        }
+
+        return curves;
+    }
+
+    private static bool TryReadSupportedBasicCurve(object kompas5, object source2D, int obj, out SketchCurve? curve)
+    {
+        curve = null;
+
+        int style = Convert.ToInt32(Com.Invoke(source2D, "ksGetObjectStyle", obj), CultureInfo.InvariantCulture);
+        if (style != BasicLineStyle)
+        {
+            return false;
+        }
+
+        object lineParam = GetParamStruct(kompas5, KoLineSegParam);
+        if (TryGetObjParam(source2D, obj, lineParam, AllParam, out int lineType) && lineType == LineSegObj)
+        {
+            curve = new LineSegCurve(GetDouble(lineParam, "x1"), GetDouble(lineParam, "y1"), GetDouble(lineParam, "x2"), GetDouble(lineParam, "y2"));
+            return true;
+        }
+
+        object circleParam = GetParamStruct(kompas5, KoCircleParam);
+        if (TryGetObjParam(source2D, obj, circleParam, AllParam, out int circleType) && circleType == CircleObj)
+        {
+            curve = new CircleCurve(GetDouble(circleParam, "xc"), GetDouble(circleParam, "yc"), GetDouble(circleParam, "rad"));
+            return true;
+        }
+
+        object arcParam = GetParamStruct(kompas5, KoArcByAngleParam);
+        if (TryGetObjParam(source2D, obj, arcParam, AllParam, out int arcType) && arcType == ArcObj)
+        {
+            curve = new ArcCurve(
+                GetDouble(arcParam, "xc"),
+                GetDouble(arcParam, "yc"),
+                GetDouble(arcParam, "rad"),
+                GetDouble(arcParam, "ang1"),
+                GetDouble(arcParam, "ang2"),
+                Convert.ToInt32(Com.TryGet(arcParam, "dir") ?? 1, CultureInfo.InvariantCulture));
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetObjParam(object document2D, int obj, object param, int parType, out int objectType)
+    {
+        try
+        {
+            objectType = Convert.ToInt32(Com.Invoke(document2D, "ksGetObjParam", obj, param, parType), CultureInfo.InvariantCulture);
+            return true;
+        }
+        catch
+        {
+            objectType = 0;
+            return false;
+        }
+    }
+
+    private static object CreateTemporaryFragmentDocument(object kompas5, DocumentInfo documentInfo, string exportPath)
+    {
+        object target2D = Com.Invoke(kompas5, "Document2D");
+        object docParam = GetParamStruct(kompas5, KoDocumentParam);
+        Com.TryInvoke(docParam, "Init");
+        SetParam(docParam, "type", DocFragment);
+        Com.TrySet(docParam, "regime", 0);
+        Com.TrySet(docParam, "fileName", Path.ChangeExtension(exportPath, ".frw"));
+        Com.TrySet(docParam, "comment", $"Laser DXF from {documentInfo.Name}");
+
+        object result = Com.Invoke(target2D, "ksCreateDocument", docParam);
+        if (result is bool ok && !ok)
+        {
+            throw new InvalidOperationException("KOMPAS failed to create a temporary 2D fragment for DXF export.");
+        }
+
+        return target2D;
+    }
+
+    private static object GetParamStruct(object kompas5, int type)
+    {
+        object param = Com.Invoke(kompas5, "GetParamStruct", type);
+        Com.TryInvoke(param, "Init");
+        return param;
+    }
+
+    private static double GetDouble(object target, string name)
+    {
+        return Convert.ToDouble(Com.TryGet(target, name) ?? throw new InvalidOperationException($"Missing parameter '{name}'."), CultureInfo.InvariantCulture);
+    }
+
     private static void OpenInBambu(string filePath, Options options)
     {
         string bambuPath = ResolveBambuPath(options.BambuPath);
@@ -369,12 +646,44 @@ internal enum ExportFormat
 
 internal sealed record DocumentInfo(string Name, string Directory, string? FullPath);
 
+internal sealed record SketchExportStats(int Copied, int Skipped);
+
+internal abstract record SketchCurve
+{
+    public abstract void Draw(object document2D);
+}
+
+internal sealed record LineSegCurve(double X1, double Y1, double X2, double Y2) : SketchCurve
+{
+    public override void Draw(object document2D)
+    {
+        Com.Invoke(document2D, "ksLineSeg", X1, Y1, X2, Y2, 1);
+    }
+}
+
+internal sealed record CircleCurve(double Xc, double Yc, double Radius) : SketchCurve
+{
+    public override void Draw(object document2D)
+    {
+        Com.Invoke(document2D, "ksCircle", Xc, Yc, Radius, 1);
+    }
+}
+
+internal sealed record ArcCurve(double Xc, double Yc, double Radius, double Angle1, double Angle2, int Direction) : SketchCurve
+{
+    public override void Draw(object document2D)
+    {
+        Com.Invoke(document2D, "ksArcByAngle", Xc, Yc, Radius, Angle1, Angle2, Direction, 1);
+    }
+}
+
 internal sealed record Options(
     ExportFormat Format,
     bool OpenBambu,
     string? BambuPath,
     string OutputFolderName,
     bool ShowHelp,
+    bool SketchDxf,
     bool NewWindow = false)
 {
     public static Options Parse(string[] args)
@@ -382,8 +691,9 @@ internal sealed record Options(
         ExportFormat format = ExportFormat.Step;
         bool openBambu = true;
         bool newWindow = false;
+        bool sketchDxf = false;
         string? bambuPath = null;
-        string outputFolderName = "print";
+        string? outputFolderName = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -402,6 +712,15 @@ internal sealed record Options(
                 case "--stl":
                     format = ExportFormat.Stl;
                     break;
+                case "dxf":
+                case "--dxf":
+                case "dxf-sketch":
+                case "sketch-dxf":
+                case "--dxf-sketch":
+                case "--sketch-dxf":
+                    sketchDxf = true;
+                    openBambu = false;
+                    break;
                 case "export":
                 case "--export-only":
                     openBambu = false;
@@ -419,13 +738,27 @@ internal sealed record Options(
                 case "-h":
                 case "--help":
                 case "/?":
-                    return new Options(format, openBambu, bambuPath, outputFolderName, ShowHelp: true, NewWindow: newWindow);
+                    return new Options(
+                        format,
+                        openBambu,
+                        bambuPath,
+                        outputFolderName ?? (sketchDxf ? "laser" : "print"),
+                        ShowHelp: true,
+                        SketchDxf: sketchDxf,
+                        NewWindow: newWindow);
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
             }
         }
 
-        return new Options(format, openBambu, bambuPath, outputFolderName, ShowHelp: false, NewWindow: newWindow);
+        return new Options(
+            format,
+            openBambu,
+            bambuPath,
+            outputFolderName ?? (sketchDxf ? "laser" : "print"),
+            ShowHelp: false,
+            SketchDxf: sketchDxf,
+            NewWindow: newWindow);
     }
 
     public static void PrintHelp()
@@ -435,16 +768,19 @@ internal sealed record Options(
 
         Usage:
           kompas-bambu [step|stl] [--new-window] [open|export] [--out-dir <name>] [--bambu <path>]
+          kompas-bambu dxf-sketch [--out-dir <name>]
 
         Defaults:
           format: step, STEP AP203
           output: <KOMPAS file folder>\print\<same-name>.step
           action: STEP reuses Bambu Studio; STL follows Bambu preferences
+          dxf-sketch output: <KOMPAS file folder>\laser\<model>-<sketch>.dxf
 
         Examples:
           kompas-bambu
           kompas-bambu step --new-window
           kompas-bambu stl
+          kompas-bambu dxf-sketch
           kompas-bambu step export
           kompas-bambu step --out-dir print
           kompas-bambu step --bambu "C:\Program Files\Bambu Studio\bambu-studio.exe"

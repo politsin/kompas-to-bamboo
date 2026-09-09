@@ -56,10 +56,20 @@ if (Test-Path $rtwTarget) {
     $sourceHash = (Get-FileHash -LiteralPath $rtwSource -Algorithm SHA256).Hash
     $targetHash = (Get-FileHash -LiteralPath $rtwTarget -Algorithm SHA256).Hash
     if ($sourceHash -ne $targetHash) {
-        Copy-Item -LiteralPath $rtwSource -Destination $rtwTarget -Force
+        try {
+            Copy-Item -LiteralPath $rtwSource -Destination $rtwTarget -Force
+        }
+        catch {
+            throw "Cannot overwrite $rtwTarget. Close KOMPAS-3D and run this installer as Administrator. Original error: $($_.Exception.Message)"
+        }
     }
 } else {
-    Copy-Item -LiteralPath $rtwSource -Destination $rtwTarget -Force
+    try {
+        Copy-Item -LiteralPath $rtwSource -Destination $rtwTarget -Force
+    }
+    catch {
+        throw "Cannot copy $rtwTarget. Run this installer as Administrator. Original error: $($_.Exception.Message)"
+    }
 }
 
 $xmlTarget = Join-Path $targetDir 'KompasBambu.xml'
