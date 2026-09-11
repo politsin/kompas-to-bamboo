@@ -1,10 +1,47 @@
 param(
     [string]$KompasRoot = 'C:\Program Files\ASCON\KOMPAS-3D v24 Home',
     [string]$ProjectRoot = $PSScriptRoot,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$NoElevate
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Quote-Argument([string]$Value) {
+    return '"' + ($Value -replace '"', '\"') + '"'
+}
+
+if (-not (Test-IsAdministrator)) {
+    if ($NoElevate) {
+        throw "Administrator rights are required to install into KOMPAS Program Files and ProgramData folders."
+    }
+
+    $argumentList = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', (Quote-Argument $PSCommandPath),
+        '-KompasRoot', (Quote-Argument $KompasRoot),
+        '-ProjectRoot', (Quote-Argument $ProjectRoot)
+    )
+
+    if ($SkipBuild) {
+        $argumentList += '-SkipBuild'
+    }
+    $argumentList += '-NoElevate'
+
+    Write-Host "Administrator rights are required. Opening elevated PowerShell via UAC..."
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
+    if ($null -ne $process.ExitCode -and $process.ExitCode -ne 0) {
+        exit $process.ExitCode
+    }
+    exit 0
+}
 
 $rtwSource = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $xmlSource = Join-Path $ProjectRoot 'rtw\KompasBambu.xml'
@@ -75,14 +112,25 @@ if (Test-Path $rtwTarget) {
 $xmlTarget = Join-Path $targetDir 'KompasBambu.xml'
 $xmlText = Get-Content -LiteralPath $xmlSource -Raw -Encoding UTF8
 $xmlText = [regex]::Replace($xmlText, '^<\?xml[^?]*\?>', '<?xml version="1.0" encoding="utf-16"?>')
-[System.IO.File]::WriteAllText($xmlTarget, $xmlText, [System.Text.Encoding]::Unicode)
+try {
+    [System.IO.File]::WriteAllText($xmlTarget, $xmlText, [System.Text.Encoding]::Unicode)
+}
+catch {
+    throw "Cannot write $xmlTarget. Close KOMPAS-3D and run this installer as Administrator. Original error: $($_.Exception.Message)"
+}
 
 foreach ($file in $exporterFiles) {
     $source = Join-Path $ProjectRoot "dist\$file"
     if (-not (Test-Path $source)) {
         throw "Exporter file is missing: $source. Run publish first."
     }
-    Copy-Item -LiteralPath $source -Destination (Join-Path $targetDir $file) -Force
+    $destination = Join-Path $targetDir $file
+    try {
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+    }
+    catch {
+        throw "Cannot copy $destination. Close KOMPAS-3D and run this installer as Administrator. Original error: $($_.Exception.Message)"
+    }
 }
 
 $xml = New-Object System.Xml.XmlDocument
@@ -151,4 +199,9 @@ if (Test-Path $userKitConfigPath) {
 
 Write-Host "Installed RTW library to $targetDir"
 Write-Host "Registered APP_KompasBambu in $kitConfigPath"
+Write-Host "Installed commands:"
+[xml]$installedAppXml = Get-Content -LiteralPath $xmlTarget -Raw -Encoding Unicode
+$installedAppXml.application.appCommand | ForEach-Object {
+    Write-Host ("  {0}: {1}" -f $_.id, $_.title)
+}
 Write-Host "Restart KOMPAS to refresh the Applications menu."

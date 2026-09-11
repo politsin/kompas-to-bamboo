@@ -139,6 +139,7 @@ C#/.NET 8 Windows console app. Делает основную работу:
 - `rtw/KompasBambu.xml` - UI-команды KOMPAS;
 - `build-rtw.bat` - сборка RTW;
 - `install-rtw-library.ps1` - установка RTW-интеграции;
+- `check-rtw-install.ps1` - проверка, что установленная в KOMPAS копия совпадает с текущей сборкой;
 - `uninstall-rtw-library.ps1` - удаление RTW-интеграции;
 - `README.md` - это описание.
 
@@ -182,7 +183,7 @@ rtw\bin\KompasBambu.rtw
 powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1
 ```
 
-Запускать от администратора, потому что файлы копируются в `Program Files`, а регистрация пишется в `ProgramData`.
+Если команда запущена из обычного PowerShell, установщик сам откроет elevated PowerShell через UAC. Это нужно, потому что файлы копируются в `Program Files`, а регистрация пишется в `ProgramData`.
 
 Что делает установщик:
 
@@ -214,9 +215,10 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 Если KOMPAS открыт во время установки, он может держать старую RTW-библиотеку загруженной. Надежный порядок такой:
 
 1. Закрыть KOMPAS.
-2. Запустить `install-rtw-library.ps1` от администратора.
-3. Открыть KOMPAS.
-4. Проверить меню `Приложения -> Bambu Studio`.
+2. Запустить `install-rtw-library.ps1`.
+3. Запустить `check-rtw-install.ps1`.
+4. Открыть KOMPAS.
+5. Проверить меню `Приложения -> Bambu Studio`.
 
 Если менялись команды меню, проверять надо не только файлы в git, а установленную копию:
 
@@ -229,10 +231,10 @@ Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBa
 Быстрая проверка установленного состояния:
 
 ```powershell
-$lib = "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu"
-Select-String -Path "$lib\KompasBambu.xml" -Pattern "appCommand|appItem|Bambu"
-Get-Item "$lib\KompasBambu.rtw", "$lib\kompas-bambu.exe" | Select-Object FullName, Length, LastWriteTime
+powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 ```
+
+Этот скрипт сравнивает установленный `KompasBambu.xml` с `rtw\KompasBambu.xml`, проверяет пункты меню, регистрацию `APP_KompasBambu` в `Base.kit.config`, hash установленного RTW и наличие `kompas-bambu.exe`.
 
 Для текущей версии в установленном XML должны быть шесть команд:
 
@@ -265,7 +267,7 @@ powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1 -SkipBuild
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1
-Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBambu.xml"
+powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 ```
 
 Если забыть второй шаг, пункт появится в меню, но будет делать не то действие. Если забыть переустановку, в KOMPAS вообще не появится новый пункт, даже если git-версия уже правильная.
