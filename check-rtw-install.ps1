@@ -14,6 +14,7 @@ $sourceRtwPath = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $kitConfigPath = 'C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config'
 $userKitConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\kHome.kit.config'
 $userAppPathsConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\UI_AppPaths.config'
+$userResourcesCachePath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\resources.bin'
 $expectedAbsoluteRtwPath = Join-Path $targetDir 'KompasBambu.rtw'
 $appId = 'APP_KompasBambu'
 
@@ -34,7 +35,7 @@ foreach ($path in @($installedXmlPath, $installedRtwPath, $installedExePath, $so
 
 function Get-CommandSpecs([xml]$Xml) {
     @(
-        $Xml.SelectNodes('//appCommand') |
+        $Xml.SelectNodes('//appCommand[@title]') |
             ForEach-Object { "$($_.id):$($_.title)" } |
             Sort-Object -Unique
     )
@@ -52,12 +53,21 @@ if ($commandDiff) {
 }
 
 $expectedMenuItems = @($sourceXml.application.menu.appItem | ForEach-Object { "$($_.id)" })
-$installedMenuItems = @($installedXml.application.menu.appItem | ForEach-Object { "$($_.id)" })
-$menuDiff = Compare-Object $expectedMenuItems $installedMenuItems
-if ($menuDiff) {
-    Write-Host "Expected menu items: $($expectedMenuItems -join ', ')"
-    Write-Host "Installed menu items: $($installedMenuItems -join ', ')"
-    Fail "Installed menu items do not match rtw\KompasBambu.xml."
+foreach ($menuId in @($appId, "$appId|Kompas.m3d", "$appId|Kompas.a3d")) {
+    $sourceMenu = $sourceXml.SelectSingleNode("//menu[@id='$menuId']")
+    $installedMenu = $installedXml.SelectSingleNode("//menu[@id='$menuId']")
+    if ($null -eq $sourceMenu -or $null -eq $installedMenu) {
+        Fail "Missing required menu '$menuId' in source or installed KompasBambu.xml."
+    }
+
+    $expectedMenuItems = @($sourceMenu.appItem | ForEach-Object { "$($_.id)" })
+    $installedMenuItems = @($installedMenu.appItem | ForEach-Object { "$($_.id)" })
+    $menuDiff = Compare-Object $expectedMenuItems $installedMenuItems
+    if ($menuDiff) {
+        Write-Host "Expected menu items for ${menuId}: $($expectedMenuItems -join ', ')"
+        Write-Host "Installed menu items for ${menuId}: $($installedMenuItems -join ', ')"
+        Fail "Installed menu items do not match rtw\KompasBambu.xml."
+    }
 }
 
 $registered = $kitXml.SelectSingleNode("//Application[@id='$appId']")
@@ -106,11 +116,41 @@ if ($sourceHash -ne $installedHash) {
     Fail "Installed RTW does not match built RTW. Re-run install-rtw-library.ps1."
 }
 
+$requiredExports = @(
+    'LIBRARYENTRY',
+    'LIBRARYID',
+    'LIBRARYNAME',
+    'LIBRARYNAMEW',
+    'DisplayLibraryNameW',
+    'LIBRARYPROTECTNUMBER',
+    'LibToolBarId',
+    'LibraryBmpBeginID'
+)
+$objdump = Get-Command objdump.exe -ErrorAction SilentlyContinue
+if ($null -eq $objdump) {
+    $scoopObjdump = Join-Path $env:USERPROFILE 'scoop\apps\mingw\current\bin\objdump.exe'
+    if (Test-Path -LiteralPath $scoopObjdump) {
+        $objdump = [pscustomobject]@{ Source = $scoopObjdump }
+    }
+}
+if ($null -ne $objdump) {
+    $exports = & $objdump.Source -p $installedRtwPath
+    foreach ($requiredExport in $requiredExports) {
+        if (-not ($exports | Select-String -SimpleMatch $requiredExport -Quiet)) {
+            Fail "Installed RTW does not export $requiredExport. Rebuild and reinstall RTW."
+        }
+    }
+}
+
+if (Test-Path -LiteralPath $userResourcesCachePath) {
+    Fail "KOMPAS UI resource cache still exists: $userResourcesCachePath. Close KOMPAS and rerun install-rtw-library.ps1 so menu changes are rebuilt."
+}
+
 Write-Host "KOMPAS RTW install is current."
 Write-Host "Installed directory: $targetDir"
 Write-Host "Registered path: $($registered.path)"
 Write-Host "Commands:"
-$installedXml.SelectNodes('//appCommand') | ForEach-Object {
+$installedXml.SelectNodes('//appCommand[@title]') | ForEach-Object {
     "$($_.id):$($_.title)"
 } | Sort-Object -Unique | ForEach-Object {
     $id, $title = $_ -split ':', 2

@@ -12,6 +12,8 @@
 
 RTW-библиотека намеренно тонкая: она только получает команду KOMPAS и запускает `kompas-bambu.exe` с нужным режимом (`step`, `stl`, `dxf-sketch`, `all-sketches-dxf`). Вся CAD-логика лежит в C# exporter, чтобы не тащить экспорт STEP/STL/DXF в C++ RTW-код.
 
+Практический вывод из отладки меню: одного XML недостаточно. KOMPAS также смотрит экспортируемые функции RTW и кеширует собранные UI-ресурсы в пользовательском `resources.bin`. Установщик поэтому пересобирает RTW, копирует XML и удаляет этот кеш, чтобы меню строилось заново.
+
 ## Что умеет
 
 Команды в KOMPAS:
@@ -73,7 +75,9 @@ DXF-экспорт эскиза фильтрует геометрию под р�
 Нативная DLL с расширением `.rtw`. Экспортирует функции старого RTW API KOMPAS:
 
 - `LIBRARYNAME()` - возвращает имя библиотеки `Bambu Studio`;
+- `LIBRARYNAMEW()` и `DisplayLibraryNameW()` - wide-версии имени для современного UI KOMPAS;
 - `LIBRARYID()` - возвращает стабильный числовой id;
+- `LIBRARYPROTECTNUMBER()`, `LibToolBarId()`, `LibraryBmpBeginID()` - совместимые RTW exports, которые есть у штатных RTW-библиотек KOMPAS и помогают UI-слою корректно обработать приложение;
 - `LIBRARYENTRY(unsigned int command)` - вызывается KOMPAS при выборе команды.
 
 `LIBRARYENTRY` мапит команды так:
@@ -212,6 +216,13 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 - добавляет или обновляет `id="APP_KompasBambu"` в пользовательском `kHome.kit.config`, потому что меню конкретной установки KOMPAS берется из пользовательского профиля;
 - удаляет старый экспериментальный путь `KompasBambuPlugin.dll` из `UI_AppPaths.config`;
 - добавляет или обновляет `APP_KompasBambu` в `UI_AppPaths.config`.
+- удаляет пользовательский кеш UI-ресурсов:
+
+```text
+%APPDATA%\ASCON\KOMPAS-3D\24\resources.bin
+```
+
+Этот файл KOMPAS пересоздает при следующем запуске. Если его оставить после изменения XML/RTW, меню `Приложения` может показывать старый набор пунктов, хотя установленный XML уже правильный.
 
 После установки нужно перезапустить KOMPAS.
 
@@ -239,6 +250,8 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 
 Этот скрипт сравнивает установленный `KompasBambu.xml` с `rtw\KompasBambu.xml`, проверяет пункты меню, регистрацию `APP_KompasBambu` в `Base.kit.config`, правильную пользовательскую регистрацию в `%APPDATA%`, hash установленного RTW и наличие `kompas-bambu.exe`.
 
+Дополнительно проверяются обязательные exports в `KompasBambu.rtw` и отсутствие старого `resources.bin`. Если `resources.bin` найден, это не рабочее состояние после установки: закрой KOMPAS и повтори установку, чтобы UI-ресурсы построились из актуального XML.
+
 Для текущей версии в установленном XML должны быть шесть команд:
 
 ```xml
@@ -261,19 +274,50 @@ powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1 -SkipBuild
 
 ## Как добавлять новые команды
 
-Для нового пункта меню нужно менять две части синхронно:
+Короткий правильный путь:
 
-1. `rtw/KompasBambu.xml` - добавить новый `<appCommand id="...">` внутрь каждого нужного `<toolBar>` и включить этот id в `<menu>/<appItem>`.
-2. `rtw/KompasBambuRtw.cpp` - добавить такой же id в `LIBRARYENTRY` и передать нужные аргументы в `kompas-bambu.exe`.
+1. Закрыть KOMPAS.
+2. Добавить команду в `rtw/KompasBambu.xml`.
+3. Добавить такой же command id в `rtw/KompasBambuRtw.cpp`.
+4. Запустить `install-rtw-library.ps1`.
+5. Запустить `check-rtw-install.ps1`.
+6. Открыть KOMPAS и проверить `Приложения -> Bambu Studio`.
 
-После этого обязательная проверка:
+В XML новый пункт должен быть описан в трех местах:
+
+1. Верхнеуровневый `<appCommand id="..." title="..." />`.
+2. Ссылка `<appCommand id="..." />` внутри каждого нужного `<toolBar>`.
+3. Ссылка `<appItem id="..." />` внутри каждого нужного `<menu>`.
+
+В C++ тот же id должен быть обработан в `LIBRARYENTRY`. RTW также должен продолжать экспортировать совместимый набор функций:
+
+```text
+LIBRARYENTRY
+LIBRARYID
+LIBRARYNAME
+LIBRARYNAMEW
+DisplayLibraryNameW
+LIBRARYPROTECTNUMBER
+LibToolBarId
+LibraryBmpBeginID
+```
+
+Обязательная проверка после изменений:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1
 powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 ```
 
-Если забыть второй шаг, пункт появится в меню, но будет делать не то действие. Если забыть переустановку, в KOMPAS вообще не появится новый пункт, даже если git-версия уже правильная.
+Если в KOMPAS видно меньше пунктов, чем в XML, сначала проверять не исходники, а установленное состояние:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
+```
+
+Чек должен подтвердить установленный XML, hash установленного `KompasBambu.rtw`, обязательные exports и отсутствие `%APPDATA%\ASCON\KOMPAS-3D\24\resources.bin`. Если `resources.bin` остался, KOMPAS может показывать старое меню даже при правильном XML.
+
+Если забыть обработчик в `LIBRARYENTRY`, пункт может появиться в меню, но не будет выполнять нужное действие. Если забыть переустановку, в KOMPAS вообще не появится новый пункт, даже если git-версия уже правильная.
 
 ## Ручной запуск
 
@@ -312,3 +356,4 @@ powershell -ExecutionPolicy Bypass -File .\uninstall-rtw-library.ps1
 ```text
 C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu
 ```
+

@@ -66,9 +66,34 @@ extern "C" __declspec(dllexport) char* __stdcall LIBRARYNAME()
     return const_cast<char*>("Bambu Studio");
 }
 
+extern "C" __declspec(dllexport) wchar_t* __stdcall LIBRARYNAMEW()
+{
+    return const_cast<wchar_t*>(L"Bambu Studio");
+}
+
+extern "C" __declspec(dllexport) wchar_t* __stdcall DisplayLibraryNameW()
+{
+    return const_cast<wchar_t*>(L"Bambu Studio");
+}
+
 extern "C" __declspec(dllexport) unsigned int __stdcall LIBRARYID()
 {
     return 0xBABA203;
+}
+
+extern "C" __declspec(dllexport) unsigned int __stdcall LIBRARYPROTECTNUMBER()
+{
+    return 0;
+}
+
+extern "C" __declspec(dllexport) unsigned int __stdcall LibraryBmpBeginID()
+{
+    return 0;
+}
+
+extern "C" __declspec(dllexport) unsigned int __stdcall LibToolBarId(int, int)
+{
+    return 0;
 }
 
 extern "C" __declspec(dllexport) void __stdcall LIBRARYENTRY(unsigned int command)

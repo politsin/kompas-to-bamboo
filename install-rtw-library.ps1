@@ -183,6 +183,7 @@ foreach ($legacyConfigPath in $legacyConfigPaths) {
 }
 
 $userKitConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\kHome.kit.config'
+$userResourcesCachePath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\resources.bin'
 if (Test-Path $userKitConfigPath) {
     $userXml = New-Object System.Xml.XmlDocument
     $userXml.PreserveWhitespace = $true
@@ -250,6 +251,16 @@ if (Test-Path $userAppPathsConfigPath) {
     }
 
     $appPathsXml.Save($userAppPathsConfigPath)
+}
+
+if (Test-Path $userResourcesCachePath) {
+    try {
+        Remove-Item -LiteralPath $userResourcesCachePath -Force
+        Write-Host "Removed KOMPAS UI resource cache: $userResourcesCachePath"
+    }
+    catch {
+        throw "Cannot remove KOMPAS UI resource cache $userResourcesCachePath. Close KOMPAS-3D and retry. Original error: $($_.Exception.Message)"
+    }
 }
 
 Write-Host "Installed RTW library to $targetDir"

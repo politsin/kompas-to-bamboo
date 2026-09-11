@@ -1,27 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
 <application id="APP_KompasBambu" libName="Bambu Studio" title="Bambu Studio" autostart="false" showInMenu="true">
 
+  <appCommand id="1" title="Bambu STEP" />
+  <appCommand id="3" title="Bambu STEP - new window" />
+  <appCommand id="2" title="Bambu STL" />
+  <appCommand id="4" title="Bambu STL - new window" />
+  <appCommand id="5" title="Laser DXF" />
+  <appCommand id="6" title="Export All Sketches DXF" />
+
   <toolBarSet id="KompasBambu_toolBarSetM3D" title="Bambu Studio">
     <toolBar id="SYSTEM" />
     <toolBar id="KompasBambu_InstrumentsM3D" title="Bambu Studio" columnsCount="1">
-      <appCommand id="1" title="Bambu STEP" />
-      <appCommand id="3" title="Bambu STEP - new window" />
-      <appCommand id="2" title="Bambu STL" />
-      <appCommand id="4" title="Bambu STL - new window" />
-      <appCommand id="5" title="Laser DXF" />
-      <appCommand id="6" title="Export All Sketches DXF" />
+      <appCommand id="1" />
+      <appCommand id="3" />
+      <appCommand id="2" />
+      <appCommand id="4" />
+      <appCommand id="5" />
+      <appCommand id="6" />
     </toolBar>
   </toolBarSet>
 
   <toolBarSet id="KompasBambu_toolBarSetA3D" title="Bambu Studio">
     <toolBar id="SYSTEM" />
     <toolBar id="KompasBambu_InstrumentsA3D" title="Bambu Studio" columnsCount="1">
-      <appCommand id="1" title="Bambu STEP" />
-      <appCommand id="3" title="Bambu STEP - new window" />
-      <appCommand id="2" title="Bambu STL" />
-      <appCommand id="4" title="Bambu STL - new window" />
-      <appCommand id="5" title="Laser DXF" />
-      <appCommand id="6" title="Export All Sketches DXF" />
+      <appCommand id="1" />
+      <appCommand id="3" />
+      <appCommand id="2" />
+      <appCommand id="4" />
+      <appCommand id="5" />
+      <appCommand id="6" />
     </toolBar>
   </toolBarSet>
 
@@ -34,6 +41,24 @@
   </toolBarTray>
 
   <menu id="APP_KompasBambu">
+    <appItem id="1" />
+    <appItem id="3" />
+    <appItem id="2" />
+    <appItem id="4" />
+    <appItem id="5" />
+    <appItem id="6" />
+  </menu>
+
+  <menu id="APP_KompasBambu|Kompas.m3d">
+    <appItem id="1" />
+    <appItem id="3" />
+    <appItem id="2" />
+    <appItem id="4" />
+    <appItem id="5" />
+    <appItem id="6" />
+  </menu>
+
+  <menu id="APP_KompasBambu|Kompas.a3d">
     <appItem id="1" />
     <appItem id="3" />
     <appItem id="2" />
