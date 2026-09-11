@@ -14,6 +14,7 @@ $sourceRtwPath = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $kitConfigPath = 'C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config'
 $userKitConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\kHome.kit.config'
 $userAppPathsConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\UI_AppPaths.config'
+$expectedAbsoluteRtwPath = Join-Path $targetDir 'KompasBambu.rtw'
 $appId = 'APP_KompasBambu'
 
 function Fail([string]$Message) {
@@ -69,17 +70,33 @@ if ($registered.path -ne 'KompasBambu\KompasBambu.rtw') {
 
 if (Test-Path -LiteralPath $userKitConfigPath) {
     [xml]$userKitXml = Get-Content -LiteralPath $userKitConfigPath -Raw
-    $userOverrides = @($userKitXml.SelectNodes("//Application[@id='KompasBambu.rtw' or @id='$appId']"))
-    if ($userOverrides.Count -gt 0) {
-        Fail "User KOMPAS profile still has KompasBambu application overrides. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    $legacyUserOverrides = @($userKitXml.SelectNodes("//Application[@id='KompasBambu.rtw']"))
+    if ($legacyUserOverrides.Count -gt 0) {
+        Fail "User KOMPAS profile still has legacy KompasBambu.rtw application overrides. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    }
+
+    $userApp = $userKitXml.SelectSingleNode("//Application[@id='$appId']")
+    if ($null -eq $userApp) {
+        Fail "User KOMPAS profile does not register APP_KompasBambu. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    }
+    if ($userApp.path -ne $expectedAbsoluteRtwPath) {
+        Fail "User KOMPAS profile points APP_KompasBambu to unexpected path: $($userApp.path)"
     }
 }
 
 if (Test-Path -LiteralPath $userAppPathsConfigPath) {
     [xml]$userAppPathsXml = Get-Content -LiteralPath $userAppPathsConfigPath -Raw
-    $staleAppPaths = @($userAppPathsXml.SelectNodes("//App[@id='$appId' or contains(@path, 'KompasBambuPlugin.dll')]"))
+    $staleAppPaths = @($userAppPathsXml.SelectNodes("//App[contains(@path, 'KompasBambuPlugin.dll')]"))
     if ($staleAppPaths.Count -gt 0) {
         Fail "User KOMPAS profile still has stale KompasBambu app paths. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    }
+
+    $userAppPath = $userAppPathsXml.SelectSingleNode("//App[@id='$appId']")
+    if ($null -eq $userAppPath) {
+        Fail "User KOMPAS app paths do not register APP_KompasBambu. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    }
+    if ($userAppPath.path -ne $expectedAbsoluteRtwPath) {
+        Fail "User KOMPAS app paths point APP_KompasBambu to unexpected path: $($userAppPath.path)"
     }
 }
 

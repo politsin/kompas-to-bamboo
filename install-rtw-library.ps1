@@ -56,6 +56,7 @@ $targetDir = Join-Path $KompasRoot 'Libs\KompasBambu'
 $kitConfigPath = 'C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config'
 $appId = 'APP_KompasBambu'
 $relativeRtwPath = 'KompasBambu\KompasBambu.rtw'
+$absoluteRtwPath = Join-Path $targetDir 'KompasBambu.rtw'
 $legacyConfigPaths = @(
     'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambu.kit.config',
     'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambuDummy.kit.config'
@@ -187,14 +188,42 @@ if (Test-Path $userKitConfigPath) {
     $userXml.PreserveWhitespace = $true
     $userXml.Load($userKitConfigPath)
 
-    $duplicateNodes = @($userXml.SelectNodes("//Application[@id='KompasBambu.rtw' or @id='$appId']"))
+    $duplicateNodes = @($userXml.SelectNodes("//Application[@id='KompasBambu.rtw']"))
     foreach ($node in $duplicateNodes) {
         [void]$node.ParentNode.RemoveChild($node)
     }
 
-    if ($duplicateNodes.Count -gt 0) {
-        $userXml.Save($userKitConfigPath)
+    $userAppNode = $userXml.SelectSingleNode("//Application[@id='$appId']")
+    if ($null -eq $userAppNode) {
+        $userGroupsNode = $userXml.SelectSingleNode('/Kit_Config/Groups')
+        if ($null -eq $userGroupsNode) {
+            throw "Cannot find /Kit_Config/Groups in $userKitConfigPath"
+        }
+
+        $userGroupNode = $userXml.SelectSingleNode('/Kit_Config/Groups/Group[not(@groupName)]')
+        if ($null -eq $userGroupNode) {
+            $userGroupNode = $userXml.CreateElement('Group')
+            [void]$userGroupsNode.PrependChild($userGroupNode)
+        }
+
+        $userAppNode = $userXml.CreateElement('Application')
+        [void]$userGroupNode.AppendChild($userAppNode)
     }
+
+    $userAttributes = [ordered]@{
+        libType = 'lbt_rtw_ocx'
+        path = $absoluteRtwPath
+        id = $appId
+        libName = 'Bambu Studio'
+        displayName = 'Bambu Studio'
+        autostart = 'true'
+    }
+
+    foreach ($entry in $userAttributes.GetEnumerator()) {
+        $userAppNode.SetAttribute($entry.Key, $entry.Value)
+    }
+
+    $userXml.Save($userKitConfigPath)
 }
 
 $userAppPathsConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\UI_AppPaths.config'
@@ -203,20 +232,30 @@ if (Test-Path $userAppPathsConfigPath) {
     $appPathsXml.PreserveWhitespace = $true
     $appPathsXml.Load($userAppPathsConfigPath)
 
-    $staleAppNodes = @($appPathsXml.SelectNodes("//App[@id='$appId' or contains(@path, 'KompasBambuPlugin.dll')]"))
+    $staleAppNodes = @($appPathsXml.SelectNodes("//App[contains(@path, 'KompasBambuPlugin.dll')]"))
     foreach ($node in $staleAppNodes) {
         [void]$node.ParentNode.RemoveChild($node)
     }
 
-    if ($staleAppNodes.Count -gt 0) {
-        $appPathsXml.Save($userAppPathsConfigPath)
+    $productNode = $appPathsXml.SelectSingleNode('/XmlRoot/Product[@id="kHome"]')
+    if ($null -ne $productNode) {
+        $appPathNode = $appPathsXml.SelectSingleNode("//App[@id='$appId']")
+        if ($null -eq $appPathNode) {
+            $appPathNode = $appPathsXml.CreateElement('App')
+            [void]$productNode.AppendChild($appPathNode)
+        }
+
+        $appPathNode.SetAttribute('id', $appId)
+        $appPathNode.SetAttribute('path', $absoluteRtwPath)
     }
+
+    $appPathsXml.Save($userAppPathsConfigPath)
 }
 
 Write-Host "Installed RTW library to $targetDir"
 Write-Host "Registered APP_KompasBambu in $kitConfigPath"
 if ((Test-Path $userKitConfigPath) -or (Test-Path $userAppPathsConfigPath)) {
-    Write-Host "Removed stale user-level KompasBambu registrations from KOMPAS profile."
+    Write-Host "Updated user-level KompasBambu registration in KOMPAS profile."
 }
 Write-Host "Installed commands:"
 [xml]$installedAppXml = Get-Content -LiteralPath $xmlTarget -Raw -Encoding Unicode

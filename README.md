@@ -208,8 +208,10 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 ```
 
 - удаляет старые экспериментальные `KompasBambu.kit.config` и `KompasBambuDummy.kit.config`;
-- удаляет ручные дубли `id="KompasBambu.rtw"` и `id="APP_KompasBambu"` из пользовательского `kHome.kit.config`, если они появились после ручного добавления через UI;
-- удаляет старый экспериментальный путь `KompasBambuPlugin.dll` и пользовательский `APP_KompasBambu` из `UI_AppPaths.config`.
+- удаляет старый ручной дубль `id="KompasBambu.rtw"` из пользовательского `kHome.kit.config`;
+- добавляет или обновляет `id="APP_KompasBambu"` в пользовательском `kHome.kit.config`, потому что меню конкретной установки KOMPAS берется из пользовательского профиля;
+- удаляет старый экспериментальный путь `KompasBambuPlugin.dll` из `UI_AppPaths.config`;
+- добавляет или обновляет `APP_KompasBambu` в `UI_AppPaths.config`.
 
 После установки нужно перезапустить KOMPAS.
 
@@ -235,7 +237,7 @@ Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBa
 powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 ```
 
-Этот скрипт сравнивает установленный `KompasBambu.xml` с `rtw\KompasBambu.xml`, проверяет пункты меню, регистрацию `APP_KompasBambu` в `Base.kit.config`, отсутствие пользовательских дублей в `%APPDATA%`, hash установленного RTW и наличие `kompas-bambu.exe`.
+Этот скрипт сравнивает установленный `KompasBambu.xml` с `rtw\KompasBambu.xml`, проверяет пункты меню, регистрацию `APP_KompasBambu` в `Base.kit.config`, правильную пользовательскую регистрацию в `%APPDATA%`, hash установленного RTW и наличие `kompas-bambu.exe`.
 
 Для текущей версии в установленном XML должны быть шесть команд:
 
