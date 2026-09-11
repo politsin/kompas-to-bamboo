@@ -17,9 +17,9 @@ RTW-библиотека намеренно тонкая: она только п
 Команды в KOMPAS:
 
 - `Приложения -> Bambu Studio -> Bambu STEP`
-- `Приложения -> Bambu Studio -> Bambu STEP — новое окно`
+- `Приложения -> Bambu Studio -> Bambu STEP - new window`
 - `Приложения -> Bambu Studio -> Bambu STL`
-- `Приложения -> Bambu Studio -> Bambu STL — новое окно`
+- `Приложения -> Bambu Studio -> Bambu STL - new window`
 - `Приложения -> Bambu Studio -> Laser DXF`
 - `Приложения -> Bambu Studio -> Export All Sketches DXF`
 
@@ -208,7 +208,8 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 ```
 
 - удаляет старые экспериментальные `KompasBambu.kit.config` и `KompasBambuDummy.kit.config`;
-- удаляет ручной дубль `id="KompasBambu.rtw"` из пользовательского `kHome.kit.config`, если он появился после ручного добавления через UI.
+- удаляет ручные дубли `id="KompasBambu.rtw"` и `id="APP_KompasBambu"` из пользовательского `kHome.kit.config`, если они появились после ручного добавления через UI;
+- удаляет старый экспериментальный путь `KompasBambuPlugin.dll` и пользовательский `APP_KompasBambu` из `UI_AppPaths.config`.
 
 После установки нужно перезапустить KOMPAS.
 
@@ -226,7 +227,7 @@ C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config
 Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBambu.xml"
 ```
 
-Именно этот XML читает KOMPAS. Если в репозитории уже есть новые `<appCommand>`/`<appItem>`, а в установленном XML их нет, значит после изменений не запускали `install-rtw-library.ps1` или установка не смогла перезаписать файлы. После изменения `rtw/KompasBambuRtw.cpp` надо также убедиться, что обновился установленный `KompasBambu.rtw`; если KOMPAS держит RTW-файл открытым, закрой KOMPAS и повтори установку.
+Именно этот XML читает KOMPAS. Команды должны быть объявлены внутри `<toolBar>`, как в штатных XML-файлах KOMPAS; верхнеуровневые `<appCommand>` могут пройти файловую проверку, но не попасть в меню приложения. Если в репозитории уже есть новые `<appCommand>`/`<appItem>`, а в установленном XML их нет, значит после изменений не запускали `install-rtw-library.ps1` или установка не смогла перезаписать файлы. После изменения `rtw/KompasBambuRtw.cpp` надо также убедиться, что обновился установленный `KompasBambu.rtw`; если KOMPAS держит RTW-файл открытым, закрой KOMPAS и повтори установку.
 
 Быстрая проверка установленного состояния:
 
@@ -234,17 +235,17 @@ Get-Content "C:\Program Files\ASCON\KOMPAS-3D v24 Home\Libs\KompasBambu\KompasBa
 powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 ```
 
-Этот скрипт сравнивает установленный `KompasBambu.xml` с `rtw\KompasBambu.xml`, проверяет пункты меню, регистрацию `APP_KompasBambu` в `Base.kit.config`, hash установленного RTW и наличие `kompas-bambu.exe`.
+Этот скрипт сравнивает установленный `KompasBambu.xml` с `rtw\KompasBambu.xml`, проверяет пункты меню, регистрацию `APP_KompasBambu` в `Base.kit.config`, отсутствие пользовательских дублей в `%APPDATA%`, hash установленного RTW и наличие `kompas-bambu.exe`.
 
 Для текущей версии в установленном XML должны быть шесть команд:
 
 ```xml
-<appCommand id="1" productID="APP_KompasBambu" title="Bambu STEP" />
-<appCommand id="3" productID="APP_KompasBambu" title="Bambu STEP — новое окно" />
-<appCommand id="2" productID="APP_KompasBambu" title="Bambu STL" />
-<appCommand id="4" productID="APP_KompasBambu" title="Bambu STL — новое окно" />
-<appCommand id="5" productID="APP_KompasBambu" title="Laser DXF" />
-<appCommand id="6" productID="APP_KompasBambu" title="Export All Sketches DXF" />
+<appCommand id="1" title="Bambu STEP" />
+<appCommand id="3" title="Bambu STEP - new window" />
+<appCommand id="2" title="Bambu STL" />
+<appCommand id="4" title="Bambu STL - new window" />
+<appCommand id="5" title="Laser DXF" />
+<appCommand id="6" title="Export All Sketches DXF" />
 ```
 
 Если повышенный PowerShell не видит `g++.exe`, можно сначала собрать RTW обычной консолью, а затем установить уже собранные файлы:
@@ -260,7 +261,7 @@ powershell -ExecutionPolicy Bypass -File .\install-rtw-library.ps1 -SkipBuild
 
 Для нового пункта меню нужно менять две части синхронно:
 
-1. `rtw/KompasBambu.xml` - добавить новый `<appCommand id="...">` и включить этот id в нужные `<appItem>`.
+1. `rtw/KompasBambu.xml` - добавить новый `<appCommand id="...">` внутрь каждого нужного `<toolBar>` и включить этот id в `<menu>/<appItem>`.
 2. `rtw/KompasBambuRtw.cpp` - добавить такой же id в `LIBRARYENTRY` и передать нужные аргументы в `kompas-bambu.exe`.
 
 После этого обязательная проверка:

@@ -187,7 +187,7 @@ if (Test-Path $userKitConfigPath) {
     $userXml.PreserveWhitespace = $true
     $userXml.Load($userKitConfigPath)
 
-    $duplicateNodes = @($userXml.SelectNodes("//Application[@id='KompasBambu.rtw']"))
+    $duplicateNodes = @($userXml.SelectNodes("//Application[@id='KompasBambu.rtw' or @id='$appId']"))
     foreach ($node in $duplicateNodes) {
         [void]$node.ParentNode.RemoveChild($node)
     }
@@ -197,11 +197,33 @@ if (Test-Path $userKitConfigPath) {
     }
 }
 
+$userAppPathsConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\UI_AppPaths.config'
+if (Test-Path $userAppPathsConfigPath) {
+    $appPathsXml = New-Object System.Xml.XmlDocument
+    $appPathsXml.PreserveWhitespace = $true
+    $appPathsXml.Load($userAppPathsConfigPath)
+
+    $staleAppNodes = @($appPathsXml.SelectNodes("//App[@id='$appId' or contains(@path, 'KompasBambuPlugin.dll')]"))
+    foreach ($node in $staleAppNodes) {
+        [void]$node.ParentNode.RemoveChild($node)
+    }
+
+    if ($staleAppNodes.Count -gt 0) {
+        $appPathsXml.Save($userAppPathsConfigPath)
+    }
+}
+
 Write-Host "Installed RTW library to $targetDir"
 Write-Host "Registered APP_KompasBambu in $kitConfigPath"
+if ((Test-Path $userKitConfigPath) -or (Test-Path $userAppPathsConfigPath)) {
+    Write-Host "Removed stale user-level KompasBambu registrations from KOMPAS profile."
+}
 Write-Host "Installed commands:"
 [xml]$installedAppXml = Get-Content -LiteralPath $xmlTarget -Raw -Encoding Unicode
-$installedAppXml.application.appCommand | ForEach-Object {
-    Write-Host ("  {0}: {1}" -f $_.id, $_.title)
+$installedAppXml.SelectNodes('//appCommand') | ForEach-Object {
+    "$($_.id):$($_.title)"
+} | Sort-Object -Unique | ForEach-Object {
+    $id, $title = $_ -split ':', 2
+    Write-Host ("  {0}: {1}" -f $id, $title)
 }
 Write-Host "Restart KOMPAS to refresh the Applications menu."

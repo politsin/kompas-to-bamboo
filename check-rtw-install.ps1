@@ -12,6 +12,8 @@ $installedExePath = Join-Path $targetDir 'kompas-bambu.exe'
 $sourceXmlPath = Join-Path $ProjectRoot 'rtw\KompasBambu.xml'
 $sourceRtwPath = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $kitConfigPath = 'C:\ProgramData\ASCON\KOMPAS-3D\24\Base.kit.config'
+$userKitConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\kHome.kit.config'
+$userAppPathsConfigPath = Join-Path $env:APPDATA 'ASCON\KOMPAS-3D\24\UI_AppPaths.config'
 $appId = 'APP_KompasBambu'
 
 function Fail([string]$Message) {
@@ -29,8 +31,16 @@ foreach ($path in @($installedXmlPath, $installedRtwPath, $installedExePath, $so
 [xml]$installedXml = Get-Content -LiteralPath $installedXmlPath -Raw -Encoding Unicode
 [xml]$kitXml = Get-Content -LiteralPath $kitConfigPath -Raw
 
-$expectedCommands = @($sourceXml.application.appCommand | ForEach-Object { "$($_.id):$($_.title)" })
-$installedCommands = @($installedXml.application.appCommand | ForEach-Object { "$($_.id):$($_.title)" })
+function Get-CommandSpecs([xml]$Xml) {
+    @(
+        $Xml.SelectNodes('//appCommand') |
+            ForEach-Object { "$($_.id):$($_.title)" } |
+            Sort-Object -Unique
+    )
+}
+
+$expectedCommands = Get-CommandSpecs $sourceXml
+$installedCommands = Get-CommandSpecs $installedXml
 $commandDiff = Compare-Object $expectedCommands $installedCommands
 if ($commandDiff) {
     Write-Host "Expected commands:"
@@ -57,6 +67,22 @@ if ($registered.path -ne 'KompasBambu\KompasBambu.rtw') {
     Fail "APP_KompasBambu points to unexpected RTW path: $($registered.path)"
 }
 
+if (Test-Path -LiteralPath $userKitConfigPath) {
+    [xml]$userKitXml = Get-Content -LiteralPath $userKitConfigPath -Raw
+    $userOverrides = @($userKitXml.SelectNodes("//Application[@id='KompasBambu.rtw' or @id='$appId']"))
+    if ($userOverrides.Count -gt 0) {
+        Fail "User KOMPAS profile still has KompasBambu application overrides. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    }
+}
+
+if (Test-Path -LiteralPath $userAppPathsConfigPath) {
+    [xml]$userAppPathsXml = Get-Content -LiteralPath $userAppPathsConfigPath -Raw
+    $staleAppPaths = @($userAppPathsXml.SelectNodes("//App[@id='$appId' or contains(@path, 'KompasBambuPlugin.dll')]"))
+    if ($staleAppPaths.Count -gt 0) {
+        Fail "User KOMPAS profile still has stale KompasBambu app paths. Re-run install-rtw-library.ps1 while KOMPAS is closed."
+    }
+}
+
 $sourceHash = (Get-FileHash -LiteralPath $sourceRtwPath -Algorithm SHA256).Hash
 $installedHash = (Get-FileHash -LiteralPath $installedRtwPath -Algorithm SHA256).Hash
 if ($sourceHash -ne $installedHash) {
@@ -67,6 +93,9 @@ Write-Host "KOMPAS RTW install is current."
 Write-Host "Installed directory: $targetDir"
 Write-Host "Registered path: $($registered.path)"
 Write-Host "Commands:"
-$installedXml.application.appCommand | ForEach-Object {
-    Write-Host ("  {0}: {1}" -f $_.id, $_.title)
+$installedXml.SelectNodes('//appCommand') | ForEach-Object {
+    "$($_.id):$($_.title)"
+} | Sort-Object -Unique | ForEach-Object {
+    $id, $title = $_ -split ':', 2
+    Write-Host ("  {0}: {1}" -f $id, $title)
 }
