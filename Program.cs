@@ -1030,6 +1030,8 @@ internal static class BambuWindow
             return false;
         }
 
+        BringIntoView(candidate);
+
         byte[] paths = Encoding.Unicode.GetBytes(filePath + "\0\0");
         int headerSize = Marshal.SizeOf<DropFiles>();
         nint hDrop = GlobalAlloc(GmemMoveable | GmemZeroInit, (nuint)(headerSize + paths.Length));
@@ -1089,6 +1091,23 @@ internal static class BambuWindow
 
     private delegate bool EnumWindowsCallback(nint handle, nint parameter);
 
+    private static void BringIntoView(nint windowHandle)
+    {
+        const uint MonitorDefaultToNull = 0;
+        const uint SwpNoZOrder = 0x0004;
+        const uint SwpShowWindow = 0x0040;
+        const int SwRestore = 9;
+
+        _ = ShowWindow(windowHandle, SwRestore);
+        if (MonitorFromWindow(windowHandle, MonitorDefaultToNull) == nint.Zero)
+        {
+            // A display that owned Bambu's last position is no longer present.
+            _ = SetWindowPos(windowHandle, nint.Zero, 100, 100, 1500, 950, SwpNoZOrder | SwpShowWindow);
+        }
+
+        _ = SetForegroundWindow(windowHandle);
+    }
+
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
 
@@ -1107,6 +1126,25 @@ internal static class BambuWindow
         uint flags,
         uint timeoutMilliseconds,
         out nint result);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint handle, int command);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        nint handle,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint handle);
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromWindow(nint handle, uint flags);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint GlobalAlloc(uint flags, nuint bytes);
