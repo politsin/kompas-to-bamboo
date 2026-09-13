@@ -352,7 +352,7 @@ KOMPAS-часть отвечает только за экспорт: она со
 %LOCALAPPDATA%\KompasBambu\Bridge\kompas-bambu-bridge.exe
 ```
 
-Bridge запускается автоматически при первой задаче и остаётся отдельным процессом. Он пишет структурированный JSONL-журнал в `%LOCALAPPDATA%\KompasBambu\logs\bridge-YYYY-MM-DD.jsonl`, а результат последней задачи — в `%LOCALAPPDATA%\KompasBambu\bridge-status.json`.
+Bridge запускается автоматически при первой задаче и остаётся отдельным процессом. Он пишет структурированный JSONL-журнал рядом с исполняемым файлом: `%LOCALAPPDATA%\KompasBambu\Bridge\bridge-YYYY-MM-DD.jsonl`; результат последней задачи лежит там же в `bridge-status.json`.
 
 ## Удаление
 

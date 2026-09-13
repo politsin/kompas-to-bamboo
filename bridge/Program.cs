@@ -16,8 +16,10 @@ internal sealed class BridgeServer
     public BridgeServer(string pipeName)
     {
         _pipeName = pipeName;
-        _root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KompasBambu");
-        Directory.CreateDirectory(Path.Combine(_root, "logs"));
+        // Keep diagnostics beside the actual deployed bridge binary. This makes
+        // it unambiguous which build received a task.
+        _root = AppContext.BaseDirectory;
+        Directory.CreateDirectory(_root);
     }
 
     public async Task RunAsync()
@@ -86,7 +88,7 @@ internal sealed class BridgeServer
     private void Log(string eventName, BridgeRequest? request, string? detail)
     {
         var entry = new { timestamp = DateTimeOffset.Now, processId = Environment.ProcessId, eventName, request, detail };
-        string path = Path.Combine(_root, "logs", $"bridge-{DateTime.Today:yyyy-MM-dd}.jsonl");
+        string path = Path.Combine(_root, $"bridge-{DateTime.Today:yyyy-MM-dd}.jsonl");
         File.AppendAllText(path, JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine);
     }
 
