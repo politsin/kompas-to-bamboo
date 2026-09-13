@@ -690,6 +690,16 @@ internal sealed class App
     {
         string bambuPath = ResolveBambuPath(options.BambuPath);
 
+        // Bambu Studio 2.8.2.61 accepts --single-instance but, on this machine,
+        // does not load the file carried by its own WM_COPYDATA IPC request. A
+        // native file-drop is what the application uses for a file dropped on
+        // its main window and does load STEP/STL into the already open project.
+        if (!options.NewWindow && BambuWindow.TryDropFile(filePath, out nint windowHandle))
+        {
+            Log($"Bambu file dropped into running window 0x{windowHandle:X}: {filePath}");
+            return;
+        }
+
         var startInfo = new ProcessStartInfo
         {
             FileName = bambuPath,
@@ -697,11 +707,10 @@ internal sealed class App
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(bambuPath) ?? Environment.CurrentDirectory
         };
-        // Use Bambu Studio's explicit IPC flags so the menu commands are deterministic.
+        // No flag here starts Bambu normally when no window is running. The
+        // explicit flag remains for the command whose purpose is a new window.
         if (options.NewWindow)
             startInfo.ArgumentList.Add("--no-single-instance");
-        else
-            startInfo.ArgumentList.Add("--single-instance");
         startInfo.ArgumentList.Add(filePath);
         Log($"Bambu arguments: {string.Join(" ", startInfo.ArgumentList)}");
         using var process = Process.Start(startInfo);
@@ -982,6 +991,134 @@ internal sealed record Options(
 
         return args[++index];
     }
+}
+
+internal static class BambuWindow
+{
+    private const uint WmDropFiles = 0x0233;
+    private const uint GmemMoveable = 0x0002;
+    private const uint GmemZeroInit = 0x0040;
+    private const uint SmtoAbortIfHung = 0x0002;
+
+    public static bool TryDropFile(string filePath, out nint windowHandle)
+    {
+        windowHandle = nint.Zero;
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        nint candidate = nint.Zero;
+        EnumWindows((handle, _) =>
+        {
+            var className = new StringBuilder(64);
+            var title = new StringBuilder(512);
+            _ = GetClassName(handle, className, className.Capacity);
+            _ = GetWindowText(handle, title, title.Capacity);
+            if (string.Equals(className.ToString(), "wxWindowNR", StringComparison.Ordinal)
+                && title.ToString().Contains("BambuStudio", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate = handle;
+                return false;
+            }
+
+            return true;
+        }, nint.Zero);
+
+        if (candidate == nint.Zero)
+        {
+            return false;
+        }
+
+        byte[] paths = Encoding.Unicode.GetBytes(filePath + "\0\0");
+        int headerSize = Marshal.SizeOf<DropFiles>();
+        nint hDrop = GlobalAlloc(GmemMoveable | GmemZeroInit, (nuint)(headerSize + paths.Length));
+        if (hDrop == nint.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            nint locked = GlobalLock(hDrop);
+            if (locked == nint.Zero)
+            {
+                return false;
+            }
+
+            try
+            {
+                Marshal.StructureToPtr(new DropFiles { FileOffset = (uint)headerSize, Wide = 1 }, locked, false);
+                Marshal.Copy(paths, 0, locked + headerSize, paths.Length);
+            }
+            finally
+            {
+                _ = GlobalUnlock(hDrop);
+            }
+
+            nint result;
+            bool delivered = SendMessageTimeout(candidate, WmDropFiles, hDrop, nint.Zero, SmtoAbortIfHung, 2000, out result) != nint.Zero;
+            if (delivered)
+            {
+                // The recipient owns hDrop after a successfully delivered WM_DROPFILES.
+                hDrop = nint.Zero;
+                windowHandle = candidate;
+                return true;
+            }
+
+            return false;
+        }
+        finally
+        {
+            if (hDrop != nint.Zero)
+            {
+                _ = GlobalFree(hDrop);
+            }
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DropFiles
+    {
+        public uint FileOffset;
+        public int X;
+        public int Y;
+        public int NonClientArea;
+        public int Wide;
+    }
+
+    private delegate bool EnumWindowsCallback(nint handle, nint parameter);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(nint handle, StringBuilder className, int capacity);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(nint handle, StringBuilder title, int capacity);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern nint SendMessageTimeout(
+        nint handle,
+        uint message,
+        nint wParam,
+        nint lParam,
+        uint flags,
+        uint timeoutMilliseconds,
+        out nint result);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalAlloc(uint flags, nuint bytes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern nint GlobalLock(nint memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GlobalUnlock(nint memory);
+
+    [DllImport("kernel32.dll")]
+    private static extern nint GlobalFree(nint memory);
 }
 
 internal static class Com
