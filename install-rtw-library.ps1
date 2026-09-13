@@ -2,7 +2,8 @@ param(
     [string]$KompasRoot = 'C:\Program Files\ASCON\KOMPAS-3D v24 Home',
     [string]$ProjectRoot = $PSScriptRoot,
     [switch]$SkipBuild,
-    [switch]$NoElevate
+    [switch]$NoElevate,
+    [string]$LogPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,6 +34,8 @@ if (-not (Test-IsAdministrator)) {
     if ($SkipBuild) {
         $argumentList += '-SkipBuild'
     }
+    $elevatedLogPath = Join-Path $env:TEMP ("kompas-bambu-install-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
+    $argumentList += '-LogPath', (Quote-Argument $elevatedLogPath)
     $argumentList += '-NoElevate'
 
     Write-Host "Administrator rights are required. Opening elevated PowerShell via UAC..."
@@ -41,9 +44,18 @@ if (-not (Test-IsAdministrator)) {
         throw "UAC elevation was cancelled. Installation was not started."
     }
     if ($process.ExitCode -ne 0) {
+        if (Test-Path -LiteralPath $elevatedLogPath) {
+            Write-Host "Elevated installer log: $elevatedLogPath"
+            Get-Content -LiteralPath $elevatedLogPath -Tail 80
+        }
         throw "Elevated installer failed with exit code $($process.ExitCode). Installation was not applied."
     }
     exit 0
+}
+
+if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    Start-Transcript -LiteralPath $LogPath -Append | Out-Null
+    Write-Host "Elevated installer log: $LogPath"
 }
 
 $rtwSource = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
@@ -69,7 +81,7 @@ $legacyConfigPaths = @(
 )
 
 $kompasProcesses = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.ProcessName -match '^KOMPAS(?:-|$)'
+    $_.ProcessName -in @('KOMPAS', 'KOMPAS-3D')
 })
 if ($kompasProcesses.Count -gt 0) {
     $processList = $kompasProcesses | ForEach-Object { "$($_.ProcessName) (PID $($_.Id))" }
@@ -111,6 +123,12 @@ if (-not (Test-Path $bridgeSourceDir)) {
 
 # The bridge is an independent Windows application in the user profile. The
 # RTW/exporter only talks to it through a local named-pipe command API.
+$bridgeProcesses = @(Get-Process -Name 'kompas-bambu-bridge' -ErrorAction SilentlyContinue)
+if ($bridgeProcesses.Count -gt 0) {
+    Write-Host "Stopping Kompas Bambu Bridge before updating its files..."
+    $bridgeProcesses | Stop-Process
+    $bridgeProcesses | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+}
 New-Item -ItemType Directory -Path $bridgeTargetDir -Force | Out-Null
 Copy-Item -Path (Join-Path $bridgeSourceDir '*') -Destination $bridgeTargetDir -Force
 
@@ -311,3 +329,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Installation verification failed. Do not open KOMPAS until check-rtw-install.ps1 succeeds."
 }
 Write-Host "INSTALLATION VERIFIED. You can start KOMPAS now."
+
+if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+    Stop-Transcript | Out-Null
+}
