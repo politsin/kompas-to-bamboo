@@ -45,6 +45,7 @@ if (-not (Test-IsAdministrator)) {
 
 $rtwSource = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $xmlSource = Join-Path $ProjectRoot 'rtw\KompasBambu.xml'
+$bridgeUpdateScript = Join-Path $ProjectRoot 'update-bambu-bridge.ps1'
 $exporterFiles = @(
     'kompas-bambu.exe',
     'kompas-bambu.dll',
@@ -85,6 +86,16 @@ if (-not (Test-Path $rtwSource)) {
 }
 if (-not (Test-Path $xmlSource)) {
     throw "RTW XML file is missing: $xmlSource."
+}
+if (-not (Test-Path $bridgeUpdateScript)) {
+    throw "Bambu bridge updater is missing: $bridgeUpdateScript."
+}
+
+# The bridge belongs to the user profile, not KOMPAS Program Files. It can be
+# updated later by running update-bambu-bridge.ps1 without this installer.
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bridgeUpdateScript
+if ($LASTEXITCODE -ne 0) {
+    throw "Bambu bridge update failed with exit code $LASTEXITCODE."
 }
 
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null

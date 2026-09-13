@@ -688,54 +688,38 @@ internal sealed class App
 
     private static void OpenInBambu(string filePath, Options options)
     {
-        string bambuPath = ResolveBambuPath(options.BambuPath);
-
-        // Bambu Studio 2.8.2.61 accepts --single-instance but, on this machine,
-        // does not load the file carried by its own WM_COPYDATA IPC request. A
-        // native file-drop is what the application uses for a file dropped on
-        // its main window and does load STEP/STL into the already open project.
-        if (!options.NewWindow && BambuWindow.TryDropFile(filePath, out nint windowHandle))
+        string bridgePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "KompasBambu",
+            "kompas-bambu-bridge.exe");
+        if (!File.Exists(bridgePath))
         {
-            Log($"Bambu file dropped into running window 0x{windowHandle:X}: {filePath}");
-            return;
+            throw new FileNotFoundException(
+                "Kompas Bambu bridge was not found. Run update-bambu-bridge.ps1 once.",
+                bridgePath);
         }
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = bambuPath,
-
+            FileName = bridgePath,
             UseShellExecute = false,
-            WorkingDirectory = Path.GetDirectoryName(bambuPath) ?? Environment.CurrentDirectory
+            WorkingDirectory = Path.GetDirectoryName(bridgePath) ?? Environment.CurrentDirectory
         };
-        // No flag here starts Bambu normally when no window is running. The
-        // explicit flag remains for the command whose purpose is a new window.
-        if (options.NewWindow)
-            startInfo.ArgumentList.Add("--no-single-instance");
+        startInfo.ArgumentList.Add("open");
+        startInfo.ArgumentList.Add("--file");
         startInfo.ArgumentList.Add(filePath);
-        Log($"Bambu arguments: {string.Join(" ", startInfo.ArgumentList)}");
-        using var process = Process.Start(startInfo);
-    }
-
-    private static string ResolveBambuPath(string? configuredPath)
-    {
-        if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))
+        if (options.NewWindow)
         {
-            return configuredPath;
+            startInfo.ArgumentList.Add("--new-window");
+        }
+        if (!string.IsNullOrWhiteSpace(options.BambuPath))
+        {
+            startInfo.ArgumentList.Add("--bambu");
+            startInfo.ArgumentList.Add(options.BambuPath);
         }
 
-        string? envPath = Environment.GetEnvironmentVariable("BAMBU_STUDIO_EXE");
-        if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
-        {
-            return envPath;
-        }
-
-        if (File.Exists(DefaultBambuPath))
-        {
-            return DefaultBambuPath;
-        }
-
-        throw new FileNotFoundException(
-            "Bambu Studio executable was not found. Pass --bambu \"path\\to\\bambu-studio.exe\" or set BAMBU_STUDIO_EXE.");
+        Log($"Bridge arguments: {string.Join(" ", startInfo.ArgumentList)}");
+        _ = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start Kompas Bambu bridge.");
     }
 
     private static void Log(string message)
