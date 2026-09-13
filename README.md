@@ -24,13 +24,15 @@ RTW-библиотека намеренно тонкая: она только п
 - `Приложения -> Bambu Studio -> Bambu STL - new window`
 - `Приложения -> Bambu Studio -> Laser DXF`
 - `Приложения -> Bambu Studio -> Export All Sketches DXF`
+- `Приложения -> Bambu Studio -> CAM STEP`
 
 Поведение по умолчанию:
 
 - формат `Bambu STEP`: STEP AP203;
 - формат `Bambu STL`: binary STL с заданными параметрами тесселяции;
 - экспортируются только тела;
-- результат кладется в папку `print` рядом с исходным файлом KOMPAS;
+- FDM-результат кладется в папку `fdm` рядом с исходным файлом KOMPAS;
+- `CAM STEP` экспортирует STEP AP203 в папку `cnc` рядом с исходным файлом KOMPAS и не запускает Bambu Studio;
 - имя экспортированного файла совпадает с именем модели;
 - `Bambu STEP` и `Bambu STL` запускают Bambu Studio через `--single-instance`, то есть передают файл в уже открытое окно; если окна нет, Bambu Studio запускается;
 - `Bambu STEP - new window` и `Bambu STL - new window` запускают Bambu Studio через `--no-single-instance`, то есть открывают отдельное окно;
@@ -42,10 +44,10 @@ RTW-библиотека намеренно тонкая: она только п
 Пример результата:
 
 ```text
-C:\Users\polit\YandexDisk\3d\...\print\Держалка к стене.step
+C:\Users\polit\YandexDisk\3d\...\fdm\Держалка к стене.step
 ```
 
-Активный документ должен быть сохранен хотя бы один раз: папка `print` создается рядом с файлом детали/сборки.
+Активный документ должен быть сохранен хотя бы один раз: папка `fdm` или `cnc` создается рядом с файлом детали/сборки.
 
 Для лазера результат пишется отдельно:
 
@@ -86,13 +88,14 @@ DXF-экспорт эскиза фильтрует геометрию под р�
 - `4` -> `kompas-bambu.exe stl --new-window`
 - `5` -> `kompas-bambu.exe dxf-sketch`
 - `6` -> `kompas-bambu.exe all-sketches-dxf`
+- `7` -> `kompas-bambu.exe cam`
 
 `rtw/KompasBambu.xml`
 
 XML-описание приложения для UI KOMPAS. Содержит:
 
 - `<application id="APP_KompasBambu" ...>`;
-- шесть команд: STEP/STL и отдельные варианты открытия в текущем или новом окне Bambu Studio, DXF выбранного эскиза и пакетный DXF всех эскизов;
+- семь команд: STEP/STL и отдельные варианты открытия в текущем или новом окне Bambu Studio, DXF выбранного эскиза, пакетный DXF всех эскизов и CAM STEP;
 - меню `<menu id="APP_KompasBambu">`;
 - toolbar trays для `m3d_main` и `a3d_main`.
 
@@ -104,7 +107,7 @@ C#/.NET 8 Windows console app. Делает основную работу:
 
 - подключается к запущенному KOMPAS через `KOMPAS.Application.5` и `KOMPAS.Application.7`;
 - берет активный 3D-документ;
-- строит путь `<папка модели>\print\<имя модели>.step|.stl`;
+- строит FDM-путь `<папка модели>\fdm\<имя модели>.step|.stl` и CAM-путь `<папка модели>\cnc\<имя модели>.step`;
 - экспортирует через API5 `AdditionFormatParam` + `SaveAsToAdditionFormat`;
 - использует API7 converter/document path как fallback;
 - запускает Bambu Studio.
@@ -251,7 +254,7 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 
 Дополнительно проверяются обязательные exports в `KompasBambu.rtw` и отсутствие старого `resources.bin`. Если `resources.bin` найден, это не рабочее состояние после установки: закрой KOMPAS и повтори установку, чтобы UI-ресурсы построились из актуального XML.
 
-Для текущей версии в установленном XML должны быть шесть команд:
+Для текущей версии в установленном XML должны быть семь команд:
 
 ```xml
 <appCommand id="1" title="Bambu STEP" />
@@ -260,6 +263,7 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 <appCommand id="4" title="Bambu STL - new window" />
 <appCommand id="5" title="Laser DXF" />
 <appCommand id="6" title="Export All Sketches DXF" />
+<appCommand id="7" title="CAM STEP" />
 ```
 
 Если повышенный PowerShell не видит `g++.exe`, можно сначала собрать RTW обычной консолью, а затем установить уже собранные файлы:
@@ -336,7 +340,9 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 .\dist\kompas-bambu.exe dxf-sketch
 .\dist\kompas-bambu.exe all-sketches-dxf
 .\dist\kompas-bambu.exe step export
-.\dist\kompas-bambu.exe step --out-dir print
+.\dist\kompas-bambu.exe step --out-dir fdm
+.\dist\kompas-bambu.exe cam
+.\dist\kompas-bambu.exe cam --out-dir cnc
 .\dist\kompas-bambu.exe dxf-sketch --out-dir laser
 .\dist\kompas-bambu.exe all-sketches-dxf --out-dir dfx
 .\dist\kompas-bambu.exe step --bambu "C:\Program Files\Bambu Studio\bambu-studio.exe"
@@ -346,7 +352,7 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 
 ## Отдельный Bambu bridge
 
-KOMPAS-часть отвечает только за экспорт: она создаёт STEP/STL в `print` и передаёт локальному bridge задание через named pipe. Логика поиска окна Bambu, передачи файла и запуска отдельного окна находится в самостоятельном Windows-приложении:
+KOMPAS-часть отвечает за экспорт: FDM-команды создают STEP/STL в `fdm` и передают локальному bridge задание через named pipe. В запросе есть поле `manufacturingTarget: "fdm"`, чтобы bridge в следующем этапе мог маршрутизировать задания по технологии. `CAM STEP` создаёт STEP в `cnc` и bridge не вызывает. Логика поиска окна Bambu, передачи файла и запуска отдельного окна находится в самостоятельном Windows-приложении:
 
 ```text
 %LOCALAPPDATA%\KompasBambu\Bridge\kompas-bambu-bridge.exe

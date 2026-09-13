@@ -7,6 +7,7 @@
   <appCommand id="4" title="Bambu STL - new window" />
   <appCommand id="5" title="Laser DXF" />
   <appCommand id="6" title="Export All Sketches DXF" />
+  <appCommand id="7" title="CAM STEP" />
 
   <toolBarSet id="KompasBambu_toolBarSetM3D" title="Bambu Studio">
     <toolBar id="SYSTEM" />
@@ -17,6 +18,7 @@
       <appCommand id="4" />
       <appCommand id="5" />
       <appCommand id="6" />
+      <appCommand id="7" />
     </toolBar>
   </toolBarSet>
 
@@ -29,6 +31,7 @@
       <appCommand id="4" />
       <appCommand id="5" />
       <appCommand id="6" />
+      <appCommand id="7" />
     </toolBar>
   </toolBarSet>
 
@@ -47,6 +50,7 @@
     <appItem id="4" />
     <appItem id="5" />
     <appItem id="6" />
+    <appItem id="7" />
   </menu>
 
   <menu id="APP_KompasBambu|Kompas.m3d">
@@ -56,6 +60,7 @@
     <appItem id="4" />
     <appItem id="5" />
     <appItem id="6" />
+    <appItem id="7" />
   </menu>
 
   <menu id="APP_KompasBambu|Kompas.a3d">
@@ -65,6 +70,7 @@
     <appItem id="4" />
     <appItem id="5" />
     <appItem id="6" />
+    <appItem id="7" />
   </menu>
 
 </application>

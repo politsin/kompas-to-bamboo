@@ -204,6 +204,7 @@ extern "C" __declspec(dllexport) void __stdcall LIBRARYENTRY(unsigned int comman
     case 4: runExporter(L"stl --new-window"); break;
     case 5: runExporter(L"dxf-sketch"); break;
     case 6: runExporter(L"all-sketches-dxf"); break;
+    case 7: runExporter(L"cam"); break;
     default: break;
     }
 }

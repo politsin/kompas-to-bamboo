@@ -12,7 +12,8 @@ return new App().Run(args);
 internal sealed class App
 {
     private const string DefaultBambuPath = @"C:\Program Files\Bambu Studio\bambu-studio.exe";
-    private const string DefaultOutputFolderName = "print";
+    private const string DefaultOutputFolderName = "fdm";
+    private const string DefaultCamOutputFolderName = "cnc";
     private const string DefaultLaserOutputFolderName = "laser";
     private const string DefaultAllSketchesOutputFolderName = "dfx";
     private const short FormatStep = 3;
@@ -196,7 +197,7 @@ internal sealed class App
         string safeName = SanitizeFileName(documentInfo.Name);
         string extension = options.Format == ExportFormat.Step ? ".step" : ".stl";
         string outputFolderName = string.IsNullOrWhiteSpace(options.OutputFolderName)
-            ? DefaultOutputFolderName
+            ? (options.IsCam ? DefaultCamOutputFolderName : DefaultOutputFolderName)
             : options.OutputFolderName;
         string exportDirectory = Path.Combine(documentInfo.Directory, SanitizeFolderName(outputFolderName));
 
@@ -690,8 +691,8 @@ internal sealed class App
 
     private static void OpenInBambu(string filePath, Options options)
     {
-        string taskId = BridgeClient.Enqueue(filePath, options.NewWindow, options.BambuPath);
-        Log($"Bridge task accepted: {taskId}; file={filePath}; newWindow={options.NewWindow}");
+        string taskId = BridgeClient.Enqueue(filePath, options.NewWindow, options.BambuPath, options.ManufacturingTarget);
+        Log($"Bridge task accepted: {taskId}; file={filePath}; target={options.ManufacturingTarget}; newWindow={options.NewWindow}");
     }
 
     private static void Log(string message)
@@ -805,8 +806,11 @@ internal sealed record Options(
     bool AllSketchesDxf,
     string? ExpectedDocumentPath,
     int? CallerProcessId,
-    bool NewWindow = false)
+    bool NewWindow = false,
+    bool IsCam = false)
 {
+    public string ManufacturingTarget => IsCam ? "cnc" : "fdm";
+
     public static Options Parse(string[] args)
     {
         ExportFormat format = ExportFormat.Step;
@@ -814,6 +818,7 @@ internal sealed record Options(
         bool newWindow = false;
         bool sketchDxf = false;
         bool allSketchesDxf = false;
+        bool isCam = false;
         string? bambuPath = null;
         string? outputFolderName = null;
         string? expectedDocumentPath = null;
@@ -835,6 +840,12 @@ internal sealed record Options(
                 case "stl":
                 case "--stl":
                     format = ExportFormat.Stl;
+                    break;
+                case "cam":
+                case "--cam":
+                    format = ExportFormat.Step;
+                    isCam = true;
+                    openBambu = false;
                     break;
                 case "dxf":
                 case "--dxf":
@@ -883,29 +894,39 @@ internal sealed record Options(
                         format,
                         openBambu,
                         bambuPath,
-                        outputFolderName ?? (allSketchesDxf ? "dfx" : sketchDxf ? "laser" : "print"),
+                        outputFolderName ?? (allSketchesDxf ? "dfx" : sketchDxf ? "laser" : isCam ? "cnc" : "fdm"),
                         ShowHelp: true,
                         SketchDxf: sketchDxf,
                         AllSketchesDxf: allSketchesDxf,
                         ExpectedDocumentPath: expectedDocumentPath,
                         CallerProcessId: callerProcessId,
-                        NewWindow: newWindow);
+                        NewWindow: newWindow,
+                        IsCam: isCam);
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
             }
+        }
+
+        // CAM is an export-only command. Keep this invariant even if a caller
+        // places an `open` switch after `cam`.
+        if (isCam)
+        {
+            format = ExportFormat.Step;
+            openBambu = false;
         }
 
         return new Options(
             format,
             openBambu,
             bambuPath,
-            outputFolderName ?? (allSketchesDxf ? "dfx" : sketchDxf ? "laser" : "print"),
+            outputFolderName ?? (allSketchesDxf ? "dfx" : sketchDxf ? "laser" : isCam ? "cnc" : "fdm"),
             ShowHelp: false,
             SketchDxf: sketchDxf,
             AllSketchesDxf: allSketchesDxf,
             ExpectedDocumentPath: expectedDocumentPath,
             CallerProcessId: callerProcessId,
-            NewWindow: newWindow);
+            NewWindow: newWindow,
+            IsCam: isCam);
     }
 
     public static void PrintHelp()
@@ -915,13 +936,15 @@ internal sealed record Options(
 
         Usage:
           kompas-bambu [step|stl] [--new-window] [open|export] [--out-dir <name>] [--bambu <path>]
+          kompas-bambu cam [--out-dir <name>]
           kompas-bambu [step|stl] [--document <path>] [--caller-pid <pid>]
           kompas-bambu dxf-sketch [--out-dir <name>]
           kompas-bambu all-sketches-dxf [--out-dir <name>]
 
         Defaults:
           format: step, STEP AP203
-          output: <KOMPAS file folder>\print\<same-name>.step
+          FDM output: <KOMPAS file folder>\fdm\<same-name>.step
+          CAM output: <KOMPAS file folder>\cnc\<same-name>.step
           action: normal commands reuse Bambu Studio; --new-window starts a separate window
           dxf-sketch output: <KOMPAS file folder>\laser\<model>-<sketch>.dxf
           all-sketches-dxf output: <KOMPAS file folder>\dfx\NN-<model>-<sketch>.dxf
@@ -933,7 +956,9 @@ internal sealed record Options(
           kompas-bambu dxf-sketch
           kompas-bambu all-sketches-dxf
           kompas-bambu step export
-          kompas-bambu step --out-dir print
+          kompas-bambu step --out-dir fdm
+          kompas-bambu cam
+          kompas-bambu cam --out-dir cnc
           kompas-bambu step --bambu "C:\Program Files\Bambu Studio\bambu-studio.exe"
         """);
     }
@@ -1120,7 +1145,7 @@ internal static class BridgeClient
     private const string PipeName = "KompasBambuBridge.v1";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public static string Enqueue(string filePath, bool newWindow, string? bambuPath)
+    public static string Enqueue(string filePath, bool newWindow, string? bambuPath, string manufacturingTarget)
     {
         string bridgePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -1132,7 +1157,12 @@ internal static class BridgeClient
             throw new FileNotFoundException("Kompas Bambu Bridge is not installed.", bridgePath);
         }
 
-        var request = new BridgeRequest(Guid.NewGuid().ToString("N"), filePath, newWindow ? "new-window" : "open", bambuPath);
+        var request = new BridgeRequest(
+            Guid.NewGuid().ToString("N"),
+            filePath,
+            newWindow ? "new-window" : "open",
+            bambuPath,
+            manufacturingTarget);
         for (int attempt = 0; attempt < 20; attempt++)
         {
             try
@@ -1170,7 +1200,10 @@ internal static class BridgeClient
         throw new InvalidOperationException("Kompas Bambu Bridge did not accept the task. See its log in %LOCALAPPDATA%\\KompasBambu\\logs.");
     }
 
-    private sealed record BridgeRequest(string Id, string FilePath, string Operation, string? BambuPath);
+    // The bridge currently ignores ManufacturingTarget, but it is deliberately
+    // included in the wire request so it can route FDM/CNC jobs later without
+    // changing the KOMPAS plugin protocol again.
+    private sealed record BridgeRequest(string Id, string FilePath, string Operation, string? BambuPath, string ManufacturingTarget);
 }
 
 internal static class Com
