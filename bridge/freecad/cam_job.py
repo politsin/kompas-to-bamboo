@@ -38,7 +38,19 @@ def selected_drill_size(hole_diameter):
     return candidates[-1] if candidates else None
 
 
-def find_vertical_holes(objects):
+def model_bounds(objects):
+    boxes = [obj.Shape.BoundBox for obj in objects]
+    return {
+        "xmin": min(box.XMin for box in boxes),
+        "xmax": max(box.XMax for box in boxes),
+        "ymin": min(box.YMin for box in boxes),
+        "ymax": max(box.YMax for box in boxes),
+        "zmin": min(box.ZMin for box in boxes),
+        "zmax": max(box.ZMax for box in boxes),
+    }
+
+
+def find_vertical_holes(objects, origin):
     holes = []
     for obj in objects:
         for face in obj.Shape.Faces:
@@ -55,7 +67,9 @@ def find_vertical_holes(objects):
             holes.append({
                 "diameter": diameter,
                 "drill": drill_size,
-                "point": [surface.Center.x, surface.Center.y, face.BoundBox.ZMax],
+                # LUNYEE WCS: left-near corner of stock top is X0 Y0 Z0.
+                "point": [surface.Center.x - origin["xmin"], surface.Center.y - origin["ymin"],
+                          face.BoundBox.ZMax - origin["zmax"]],
                 "depth": face.BoundBox.ZMin - face.BoundBox.ZMax,
             })
     return holes
@@ -64,12 +78,33 @@ def find_vertical_holes(objects):
 def create_job(step_path, output_path, status_path):
     document = App.newDocument("Kompas_CAM_Job")
     Import.insert(step_path, document.Name)
-    objects = [obj for obj in document.Objects if hasattr(obj, "Shape") and not obj.Shape.isNull()]
-    if not objects:
+    imported_shapes = [obj.Shape for obj in document.Objects if hasattr(obj, "Shape") and not obj.Shape.isNull()
+                       and obj.Shape.BoundBox.XLength > 0 and obj.Shape.BoundBox.YLength > 0]
+    if not imported_shapes:
         raise RuntimeError("STEP did not contain a solid suitable for a CAM job.")
 
+    # STEP assemblies may import as several document objects. Path's stock
+    # generator needs one finite CAM base, so preserve their geometry in a
+    # single compound rather than passing the importer objects directly.
+    cam_model = document.addObject("PartDesign::Feature", "CAM_Model")
+    cam_model.Label = "Imported STEP CAM base"
+    cam_model.Shape = Part.makeCompound(imported_shapes)
+    document.recompute()
+    objects = [cam_model]
+
+    bounds = model_bounds(objects)
+    dimensions = (bounds["xmax"] - bounds["xmin"], bounds["ymax"] - bounds["ymin"], bounds["zmax"] - bounds["zmin"])
+    if min(dimensions) <= 0:
+        raise RuntimeError("STEP CAM base has a zero bounding-box dimension: {}".format(dimensions))
     job = Job.Create("CAM_Job", objects)
     job.Label = "KOMPAS CAM Job"
+    job.PostProcessor = "grbl"
+    job.addProperty("App::PropertyString", "MachineProfile", "KOMPAS CAM")
+    job.MachineProfile = "LUNYEE 4040 Titan (GRBL, 400 x 400 x 95 mm, spindle <= 12000 RPM)"
+    job.addProperty("App::PropertyString", "WorkCoordinateOrigin", "KOMPAS CAM")
+    job.WorkCoordinateOrigin = "Xmin/Ymin/Zmax: left-near top corner of stock"
+    job.addProperty("App::PropertyVector", "WorkCoordinateModelPoint", "KOMPAS CAM")
+    job.WorkCoordinateModelPoint = App.Vector(bounds["xmin"], bounds["ymin"], bounds["zmax"])
 
     controllers = {}
     tool_number = 10
@@ -83,7 +118,7 @@ def create_job(step_path, output_path, status_path):
     tool_number += 1
     controllers[("ball", 3.0)] = add_tool(document, job, ToolBitBallend, "ballend", "Ball-nose endmill 3 mm", 3.0, tool_number)
 
-    holes = find_vertical_holes(objects)
+    holes = find_vertical_holes(objects, bounds)
     holes_by_drill = {}
     for hole in holes:
         holes_by_drill.setdefault(hole["drill"], []).append(hole)
@@ -99,6 +134,7 @@ def create_job(step_path, output_path, status_path):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     document.saveAs(output_path)
     write_status(status_path, state="created", outputFile=output_path, holes=holes,
+                 machine="LUNYEE 4040 Titan", postProcessor="grbl", workCoordinateOrigin="Xmin/Ymin/Zmax",
                  drillOperations=len(holes_by_drill), toolControllers=len(job.Tools.Group))
 
 
