@@ -43,6 +43,13 @@ function Get-CommandSpecs([xml]$Xml) {
 
 $expectedCommands = Get-CommandSpecs $sourceXml
 $installedCommands = Get-CommandSpecs $installedXml
+$requiredCamCommand = '7:CAM STEP'
+if ($requiredCamCommand -notin $expectedCommands) {
+    Fail "SOURCE XML IS MISSING REQUIRED MENU COMMAND: $requiredCamCommand"
+}
+if ($requiredCamCommand -notin $installedCommands) {
+    Fail "INSTALLED KOMPAS MENU IS MISSING $requiredCamCommand. CLOSE KOMPAS, RUN install-rtw-library.ps1, THEN RUN THIS CHECK AGAIN."
+}
 $commandDiff = Compare-Object $expectedCommands $installedCommands
 if ($commandDiff) {
     Write-Host "Expected commands:"
