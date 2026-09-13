@@ -71,11 +71,9 @@ internal sealed class App
                     Console.WriteLine($"Exported: {exportPathFromExpectedDocument}");
                     Log($"Exported from RTW document path: {exportPathFromExpectedDocument}");
 
-                    if (options.OpenBambu)
+                    if (options.SendToBridge)
                     {
-                        OpenInBambu(exportPathFromExpectedDocument, options);
-                        Console.WriteLine("File sent to Bambu Studio.");
-                        Log("File sent to Bambu Studio.");
+                        SubmitToBridge(exportPathFromExpectedDocument, options);
                     }
 
                     return 0;
@@ -134,11 +132,9 @@ internal sealed class App
             Console.WriteLine($"Exported: {exportPath}");
             Log($"Exported: {exportPath}");
 
-            if (options.OpenBambu)
+            if (options.SendToBridge)
             {
-                OpenInBambu(exportPath, options);
-                Console.WriteLine("File sent to Bambu Studio.");
-                Log("File sent to Bambu Studio.");
+                SubmitToBridge(exportPath, options);
             }
 
             return 0;
@@ -689,10 +685,11 @@ internal sealed class App
         return Convert.ToDouble(Com.TryGet(target, name) ?? throw new InvalidOperationException($"Missing parameter '{name}'."), CultureInfo.InvariantCulture);
     }
 
-    private static void OpenInBambu(string filePath, Options options)
+    private static void SubmitToBridge(string filePath, Options options)
     {
         string taskId = BridgeClient.Enqueue(filePath, options.NewWindow, options.BambuPath, options.ManufacturingTarget);
         Log($"Bridge task accepted: {taskId}; file={filePath}; target={options.ManufacturingTarget}; newWindow={options.NewWindow}");
+        Console.WriteLine(options.IsCam ? "CAM job sent to bridge." : "File sent to Bambu Studio.");
     }
 
     private static void Log(string message)
@@ -810,6 +807,7 @@ internal sealed record Options(
     bool IsCam = false)
 {
     public string ManufacturingTarget => IsCam ? "cnc" : "fdm";
+    public bool SendToBridge => IsCam || OpenBambu;
 
     public static Options Parse(string[] args)
     {

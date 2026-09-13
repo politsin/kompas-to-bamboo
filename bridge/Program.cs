@@ -56,6 +56,12 @@ internal sealed class BridgeServer
         try
         {
             if (!File.Exists(request.FilePath)) throw new FileNotFoundException("Export file is missing.", request.FilePath);
+            if (string.Equals(request.ManufacturingTarget, "cnc", StringComparison.OrdinalIgnoreCase))
+            {
+                ExecuteCnc(request);
+                return;
+            }
+
             string bambu = ResolveBambuPath(request.BambuPath);
             if (request.Operation == "open" && BambuDelivery.TrySendToExistingWindow(bambu, request.FilePath, out nint window))
             {
@@ -80,11 +86,57 @@ internal sealed class BridgeServer
         }
     }
 
+    private void ExecuteCnc(BridgeRequest request)
+    {
+        string extension = Path.GetExtension(request.FilePath);
+        if (!string.Equals(extension, ".step", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(extension, ".stp", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("CNC bridge accepts STEP files only.");
+        }
+
+        string freeCad = ResolveFreeCadCmd();
+        string script = Path.Combine(AppContext.BaseDirectory, "freecad", "cam_job.py");
+        if (!File.Exists(script)) throw new FileNotFoundException("FreeCAD CAM script is missing.", script);
+
+        string output = Path.ChangeExtension(request.FilePath, ".FCStd");
+        string scriptStatus = Path.ChangeExtension(request.FilePath, ".cam-status.json");
+        var start = new ProcessStartInfo { FileName = freeCad, UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(request.FilePath) ?? Environment.CurrentDirectory };
+        start.ArgumentList.Add(script);
+        start.Environment["KOMPAS_BAMBU_CAM_INPUT"] = request.FilePath;
+        start.Environment["KOMPAS_BAMBU_CAM_OUTPUT"] = output;
+        start.Environment["KOMPAS_BAMBU_CAM_STATUS"] = scriptStatus;
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start FreeCAD CAM.");
+        process.WaitForExit();
+        if (process.ExitCode != 0 || !File.Exists(output))
+        {
+            string detail = File.Exists(scriptStatus) ? File.ReadAllText(scriptStatus) : $"FreeCAD exited with code {process.ExitCode}.";
+            throw new InvalidOperationException("FreeCAD CAM job creation failed: " + detail);
+        }
+
+        Log("created-cam-job", request, $"output={output}");
+        WriteStatus(request, "created-cam-job", null);
+    }
+
     private static string ResolveBambuPath(string? configuredPath)
     {
         string? envPath = Environment.GetEnvironmentVariable("BAMBU_STUDIO_EXE");
         string[] candidates = [configuredPath ?? string.Empty, envPath ?? string.Empty, @"C:\Program Files\Bambu Studio\bambu-studio.exe"];
         return candidates.FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("Bambu Studio executable was not found.");
+    }
+
+    private static string ResolveFreeCadCmd()
+    {
+        string? configured = Environment.GetEnvironmentVariable("KOMPAS_BAMBU_FREECAD_CMD");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(configured)) return configured;
+        string apps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Apps");
+        string? discovered = Directory.Exists(apps)
+            ? Directory.EnumerateFiles(apps, "FreeCADCmd.exe", SearchOption.AllDirectories)
+                .Where(path => path.Contains("FreeCAD-weekly-", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault()
+            : null;
+        return discovered ?? throw new FileNotFoundException("FreeCAD weekly was not found. Set KOMPAS_BAMBU_FREECAD_CMD to FreeCADCmd.exe.");
     }
 
     private void Log(string eventName, BridgeRequest? request, string? detail)
@@ -100,7 +152,7 @@ internal sealed class BridgeServer
     }
 }
 
-internal sealed record BridgeRequest(string Id, string FilePath, string Operation, string? BambuPath);
+internal sealed record BridgeRequest(string Id, string FilePath, string Operation, string? BambuPath, string ManufacturingTarget = "fdm");
 
 internal static class BambuDelivery
 {

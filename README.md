@@ -57,7 +57,7 @@ RTW-библиотека намеренно тонкая: она только п
 - формат `Bambu STL`: binary STL с заданными параметрами тесселяции;
 - экспортируются только тела;
 - FDM-результат кладется в папку `fdm` рядом с исходным файлом KOMPAS;
-- `CAM STEP` экспортирует STEP AP203 в папку `cnc` рядом с исходным файлом KOMPAS и не запускает Bambu Studio;
+- `CAM STEP` экспортирует STEP AP203 в папку `cnc` рядом с исходным файлом KOMPAS и передаёт его bridge для создания FreeCAD CAM Job;
 - имя экспортированного файла совпадает с именем модели;
 - `Bambu STEP` и `Bambu STL` запускают Bambu Studio через `--single-instance`, то есть передают файл в уже открытое окно; если окна нет, Bambu Studio запускается;
 - `Bambu STEP - new window` и `Bambu STL - new window` запускают Bambu Studio через `--no-single-instance`, то есть открывают отдельное окно;
@@ -377,13 +377,19 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 
 ## Отдельный Bambu bridge
 
-KOMPAS-часть отвечает за экспорт: FDM-команды создают STEP/STL в `fdm` и передают локальному bridge задание через named pipe. В запросе есть поле `manufacturingTarget: "fdm"`, чтобы bridge в следующем этапе мог маршрутизировать задания по технологии. `CAM STEP` создаёт STEP в `cnc` и bridge не вызывает. Логика поиска окна Bambu, передачи файла и запуска отдельного окна находится в самостоятельном Windows-приложении:
+KOMPAS-часть отвечает за экспорт: FDM-команды создают STEP/STL в `fdm`, а CAM — STEP в `cnc`; оба типа передаются локальному bridge через named pipe с `manufacturingTarget` (`fdm` или `cnc`). Логика поиска окна Bambu, передачи файла, запуска отдельного окна и создания FreeCAD CAM Job находится в самостоятельном Windows-приложении:
 
 ```text
 %LOCALAPPDATA%\KompasBambu\Bridge\kompas-bambu-bridge.exe
 ```
 
 Bridge запускается автоматически при первой задаче и остаётся отдельным процессом. Он пишет структурированный JSONL-журнал рядом с исполняемым файлом: `%LOCALAPPDATA%\KompasBambu\Bridge\bridge-YYYY-MM-DD.jsonl`; результат последней задачи лежит там же в `bridge-status.json`.
+
+### CAM через FreeCAD
+
+Для `CAM STEP` bridge запускает FreeCAD weekly через `FreeCADCmd.exe` и сохраняет редактируемый CAM Job рядом с исходным STEP: `<имя>.FCStd`. Требуется FreeCAD weekly (26.3.x); путь можно задать переменной `KOMPAS_BAMBU_FREECAD_CMD`, иначе bridge ищет weekly в `%USERPROFILE%\Apps`.
+
+Job содержит Tool Controller для свёрл с шагом 0.1 мм от 0.6 до 3.0 мм, кукурузных фрез 1.5 и 3 мм, и ball-nose 3 мм. Вертикальные внутренние цилиндрические отверстия распознаются из STEP; для каждого выбирается самое большое сверло, не превышающее диаметр отверстия, и создаётся drilling-операция. G-code не выпускается автоматически: до настройки станка, материала, нулевой точки и postprocessor-а это небезопасно.
 
 ## Удаление
 
