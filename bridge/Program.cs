@@ -56,20 +56,22 @@ internal sealed class BridgeServer
         try
         {
             if (!File.Exists(request.FilePath)) throw new FileNotFoundException("Export file is missing.", request.FilePath);
-            if (request.Operation == "open" && BambuDelivery.TryDropFile(request.FilePath, out nint window))
+            string bambu = ResolveBambuPath(request.BambuPath);
+            if (request.Operation == "open" && BambuDelivery.TrySendToExistingWindow(bambu, request.FilePath, out nint window))
             {
                 Log("delivered-existing-window", request, $"window=0x{window:X}");
                 WriteStatus(request, "delivered-existing-window", null);
                 return;
             }
 
-            string bambu = ResolveBambuPath(request.BambuPath);
             var start = new ProcessStartInfo { FileName = bambu, UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(bambu) ?? Environment.CurrentDirectory };
-            if (request.Operation == "new-window") start.ArgumentList.Add("--no-single-instance");
+            // Bambu Studio 2.8.2.61 creates an independent window when launched
+            // with a model path. Its --*-single-instance switches exit with -2.
             start.ArgumentList.Add(request.FilePath);
-            _ = Process.Start(start) ?? throw new InvalidOperationException("Could not start Bambu Studio.");
-            Log("started-bambu", request, string.Join(" ", start.ArgumentList));
-            WriteStatus(request, "started-bambu", null);
+            Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start Bambu Studio.");
+            string state = request.Operation == "new-window" ? "started-new-window" : "started-bambu";
+            Log(state, request, $"pid={process.Id}; args={string.Join(" ", start.ArgumentList)}");
+            WriteStatus(request, state, null);
         }
         catch (Exception error)
         {
@@ -102,56 +104,65 @@ internal sealed record BridgeRequest(string Id, string FilePath, string Operatio
 
 internal static class BambuDelivery
 {
-    private const uint WmDropFiles = 0x0233, GmemMoveable = 0x0002, GmemZeroInit = 0x0040, SmtoAbortIfHung = 0x0002;
+    private const uint WmCopyData = 0x004A, SmtoAbortIfHung = 0x0002;
 
-    public static bool TryDropFile(string filePath, out nint window)
+    public static bool TrySendToExistingWindow(string bambuPath, string filePath, out nint window)
     {
         window = nint.Zero;
         nint target = nint.Zero;
+        string expectedPath = Path.GetFullPath(bambuPath);
         EnumWindows((handle, _) =>
         {
-            var className = new StringBuilder(64); var title = new StringBuilder(512);
-            _ = GetClassName(handle, className, className.Capacity); _ = GetWindowText(handle, title, title.Capacity);
-            if (className.ToString() == "wxWindowNR" && title.ToString().Contains("BambuStudio", StringComparison.OrdinalIgnoreCase)) { target = handle; return false; }
-            return true;
+            var className = new StringBuilder(64);
+            var title = new StringBuilder(512);
+            _ = GetClassName(handle, className, className.Capacity);
+            _ = GetWindowText(handle, title, title.Capacity);
+            if (className.ToString() != "wxWindowNR" || !title.ToString().Contains("BambuStudio", StringComparison.OrdinalIgnoreCase)) return true;
+
+            GetWindowThreadProcessId(handle, out uint processId);
+            try
+            {
+                using Process process = Process.GetProcessById((int)processId);
+                if (!string.Equals(Path.GetFullPath(process.MainModule?.FileName ?? string.Empty), expectedPath, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            catch
+            {
+                return true;
+            }
+
+            target = handle;
+            return false;
         }, nint.Zero);
         if (target == nint.Zero) return false;
 
-        BringIntoView(target);
-        byte[] paths = Encoding.Unicode.GetBytes(filePath + "\0\0");
-        int header = Marshal.SizeOf<DropFiles>();
-        nint hDrop = GlobalAlloc(GmemMoveable | GmemZeroInit, (nuint)(header + paths.Length));
-        if (hDrop == nint.Zero) return false;
+        // InstanceCheck.cpp sends an escaped argv list by WM_COPYDATA.  The first
+        // entry is the executable and every following entry that exists is loaded.
+        string message = $"{EscapeCStyleArgument(expectedPath)} {EscapeCStyleArgument(Path.GetFullPath(filePath))}";
+        byte[] payload = Encoding.Unicode.GetBytes(message + '\0');
+        GCHandle pinnedPayload = GCHandle.Alloc(payload, GCHandleType.Pinned);
         try
         {
-            nint memory = GlobalLock(hDrop); if (memory == nint.Zero) return false;
-            try { Marshal.StructureToPtr(new DropFiles { FileOffset = (uint)header, Wide = 1 }, memory, false); Marshal.Copy(paths, 0, memory + header, paths.Length); }
-            finally { _ = GlobalUnlock(hDrop); }
-            if (SendMessageTimeout(target, WmDropFiles, hDrop, nint.Zero, SmtoAbortIfHung, 2000, out _) == nint.Zero) return false;
-            hDrop = nint.Zero; window = target; return true;
+            var data = new CopyDataStruct { Data = 1, Bytes = payload.Length, Pointer = pinnedPayload.AddrOfPinnedObject() };
+            if (SendMessageTimeout(target, WmCopyData, nint.Zero, ref data, SmtoAbortIfHung, 5000, out _) == nint.Zero) return false;
+            window = target;
+            return true;
         }
-        finally { if (hDrop != nint.Zero) _ = GlobalFree(hDrop); }
+        finally
+        {
+            pinnedPayload.Free();
+        }
     }
 
-    private static void BringIntoView(nint target)
-    {
-        _ = ShowWindow(target, 9);
-        if (MonitorFromWindow(target, 0) == nint.Zero) _ = SetWindowPos(target, nint.Zero, 100, 100, 1500, 950, 0x0004 | 0x0040);
-        _ = SetForegroundWindow(target);
-    }
+    private static string EscapeCStyleArgument(string value) =>
+        '"' + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + '"';
 
-    [StructLayout(LayoutKind.Sequential)] private struct DropFiles { public uint FileOffset; public int X; public int Y; public int NonClientArea; public int Wide; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CopyDataStruct { public nuint Data; public int Bytes; public nint Pointer; }
+
     private delegate bool WindowCallback(nint handle, nint parameter);
     [DllImport("user32.dll")] private static extern bool EnumWindows(WindowCallback callback, nint parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(nint handle, StringBuilder className, int capacity);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(nint handle, StringBuilder title, int capacity);
-    [DllImport("user32.dll")] private static extern nint SendMessageTimeout(nint handle, uint message, nint wParam, nint lParam, uint flags, uint timeout, out nint result);
-    [DllImport("user32.dll")] private static extern bool ShowWindow(nint handle, int command);
-    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint handle, nint after, int x, int y, int width, int height, uint flags);
-    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint handle);
-    [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint handle, uint flags);
-    [DllImport("kernel32.dll")] private static extern nint GlobalAlloc(uint flags, nuint bytes);
-    [DllImport("kernel32.dll")] private static extern nint GlobalLock(nint memory);
-    [DllImport("kernel32.dll")] private static extern bool GlobalUnlock(nint memory);
-    [DllImport("kernel32.dll")] private static extern nint GlobalFree(nint memory);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(nint handle, out uint processId);
+    [DllImport("user32.dll")] private static extern nint SendMessageTimeout(nint handle, uint message, nint wParam, ref CopyDataStruct lParam, uint flags, uint timeout, out nint result);
 }
