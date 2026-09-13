@@ -45,7 +45,9 @@ if (-not (Test-IsAdministrator)) {
 
 $rtwSource = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $xmlSource = Join-Path $ProjectRoot 'rtw\KompasBambu.xml'
-$bridgeUpdateScript = Join-Path $ProjectRoot 'update-bambu-bridge.ps1'
+$bridgeProject = Join-Path $ProjectRoot 'bridge\KompasBambu.Bridge.csproj'
+$bridgeSourceDir = Join-Path $ProjectRoot 'bridge\dist'
+$bridgeTargetDir = Join-Path $env:LOCALAPPDATA 'KompasBambu\Bridge'
 $exporterFiles = @(
     'kompas-bambu.exe',
     'kompas-bambu.dll',
@@ -75,6 +77,11 @@ if (-not $SkipBuild) {
         if ($LASTEXITCODE -ne 0) {
             throw "build-rtw.bat failed with exit code $LASTEXITCODE"
         }
+
+        & dotnet publish $bridgeProject -c Release -r win-x64 --self-contained false -o $bridgeSourceDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Bambu Bridge build failed with exit code $LASTEXITCODE"
+        }
     }
     finally {
         Pop-Location
@@ -87,16 +94,14 @@ if (-not (Test-Path $rtwSource)) {
 if (-not (Test-Path $xmlSource)) {
     throw "RTW XML file is missing: $xmlSource."
 }
-if (-not (Test-Path $bridgeUpdateScript)) {
-    throw "Bambu bridge updater is missing: $bridgeUpdateScript."
+if (-not (Test-Path $bridgeSourceDir)) {
+    throw "Bambu Bridge build output is missing: $bridgeSourceDir."
 }
 
-# The bridge belongs to the user profile, not KOMPAS Program Files. It can be
-# updated later by running update-bambu-bridge.ps1 without this installer.
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bridgeUpdateScript
-if ($LASTEXITCODE -ne 0) {
-    throw "Bambu bridge update failed with exit code $LASTEXITCODE."
-}
+# The bridge is an independent Windows application in the user profile. The
+# RTW/exporter only talks to it through a local named-pipe command API.
+New-Item -ItemType Directory -Path $bridgeTargetDir -Force | Out-Null
+Copy-Item -Path (Join-Path $bridgeSourceDir '*') -Destination $bridgeTargetDir -Force
 
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 

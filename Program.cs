@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 return new App().Run(args);
@@ -688,38 +690,8 @@ internal sealed class App
 
     private static void OpenInBambu(string filePath, Options options)
     {
-        string bridgePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "KompasBambu",
-            "kompas-bambu-bridge.exe");
-        if (!File.Exists(bridgePath))
-        {
-            throw new FileNotFoundException(
-                "Kompas Bambu bridge was not found. Run update-bambu-bridge.ps1 once.",
-                bridgePath);
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = bridgePath,
-            UseShellExecute = false,
-            WorkingDirectory = Path.GetDirectoryName(bridgePath) ?? Environment.CurrentDirectory
-        };
-        startInfo.ArgumentList.Add("open");
-        startInfo.ArgumentList.Add("--file");
-        startInfo.ArgumentList.Add(filePath);
-        if (options.NewWindow)
-        {
-            startInfo.ArgumentList.Add("--new-window");
-        }
-        if (!string.IsNullOrWhiteSpace(options.BambuPath))
-        {
-            startInfo.ArgumentList.Add("--bambu");
-            startInfo.ArgumentList.Add(options.BambuPath);
-        }
-
-        Log($"Bridge arguments: {string.Join(" ", startInfo.ArgumentList)}");
-        _ = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start Kompas Bambu bridge.");
+        string taskId = BridgeClient.Enqueue(filePath, options.NewWindow, options.BambuPath);
+        Log($"Bridge task accepted: {taskId}; file={filePath}; newWindow={options.NewWindow}");
     }
 
     private static void Log(string message)
@@ -1141,6 +1113,64 @@ internal static class BambuWindow
 
     [DllImport("kernel32.dll")]
     private static extern nint GlobalFree(nint memory);
+}
+
+internal static class BridgeClient
+{
+    private const string PipeName = "KompasBambuBridge.v1";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public static string Enqueue(string filePath, bool newWindow, string? bambuPath)
+    {
+        string bridgePath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "KompasBambu",
+            "Bridge",
+            "kompas-bambu-bridge.exe");
+        if (!File.Exists(bridgePath))
+        {
+            throw new FileNotFoundException("Kompas Bambu Bridge is not installed.", bridgePath);
+        }
+
+        var request = new BridgeRequest(Guid.NewGuid().ToString("N"), filePath, newWindow ? "new-window" : "open", bambuPath);
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.None);
+                pipe.Connect(250);
+                using var writer = new StreamWriter(pipe, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+                using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                writer.WriteLine(JsonSerializer.Serialize(request, JsonOptions));
+                string? response = reader.ReadLine();
+                if (response is not null && response.StartsWith("accepted:", StringComparison.Ordinal))
+                {
+                    return request.Id;
+                }
+            }
+            catch (TimeoutException)
+            {
+            }
+            catch (IOException)
+            {
+            }
+
+            if (attempt == 0)
+            {
+                _ = Process.Start(new ProcessStartInfo
+                {
+                    FileName = bridgePath,
+                    UseShellExecute = true,
+                    WorkingDirectory = Path.GetDirectoryName(bridgePath) ?? Environment.CurrentDirectory
+                });
+            }
+            Thread.Sleep(150);
+        }
+
+        throw new InvalidOperationException("Kompas Bambu Bridge did not accept the task. See its log in %LOCALAPPDATA%\\KompasBambu\\logs.");
+    }
+
+    private sealed record BridgeRequest(string Id, string FilePath, string Operation, string? BambuPath);
 }
 
 internal static class Com

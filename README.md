@@ -138,7 +138,6 @@ C#/.NET 8 Windows console app. Делает основную работу:
 - `Program.cs` - exporter/launcher;
 - `KompasBambu.csproj` - проект .NET exporter;
 - `bridge/` - независимое приложение, которое получает готовый STEP/STL и работает с Bambu Studio;
-- `update-bambu-bridge.ps1` - обновляет bridge в `%LOCALAPPDATA%` без установки в KOMPAS;
 - `rtw/KompasBambuRtw.cpp` - native RTW shim;
 - `rtw/KompasBambu.xml` - UI-команды KOMPAS;
 - `build-rtw.bat` - сборка RTW;
@@ -347,19 +346,13 @@ powershell -ExecutionPolicy Bypass -File .\check-rtw-install.ps1
 
 ## Отдельный Bambu bridge
 
-KOMPAS-часть отвечает только за экспорт: она создаёт STEP/STL в `print` и запускает bridge с путём к этому файлу. Логика поиска окна Bambu, передачи файла и запуска отдельного окна находится в самостоятельном приложении:
+KOMPAS-часть отвечает только за экспорт: она создаёт STEP/STL в `print` и передаёт локальному bridge задание через named pipe. Логика поиска окна Bambu, передачи файла и запуска отдельного окна находится в самостоятельном Windows-приложении:
 
 ```text
-%LOCALAPPDATA%\KompasBambu\kompas-bambu-bridge.exe
+%LOCALAPPDATA%\KompasBambu\Bridge\kompas-bambu-bridge.exe
 ```
 
-Первичная установка `install-rtw-library.ps1` ставит и bridge. В дальнейшем, когда меняется только логика Bambu, KOMPAS закрывать и RTW переустанавливать не нужно:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\update-bambu-bridge.ps1
-```
-
-Bridge пишет диагностический журнал в `%TEMP%\kompas-bambu-bridge.log`.
+Bridge запускается автоматически при первой задаче и остаётся отдельным процессом. Он пишет структурированный JSONL-журнал в `%LOCALAPPDATA%\KompasBambu\logs\bridge-YYYY-MM-DD.jsonl`, а результат последней задачи — в `%LOCALAPPDATA%\KompasBambu\bridge-status.json`.
 
 ## Удаление
 
