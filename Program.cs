@@ -697,10 +697,11 @@ internal sealed class App
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(bambuPath) ?? Environment.CurrentDirectory
         };
-        // Bambu Studio's default file-open path reuses the existing instance.
-        // Keep an explicit flag only for the forced new-window commands.
+        // Use Bambu Studio's explicit IPC flags so the menu commands are deterministic.
         if (options.NewWindow)
             startInfo.ArgumentList.Add("--no-single-instance");
+        else
+            startInfo.ArgumentList.Add("--single-instance");
         startInfo.ArgumentList.Add(filePath);
         Log($"Bambu arguments: {string.Join(" ", startInfo.ArgumentList)}");
         using var process = Process.Start(startInfo);
@@ -956,7 +957,7 @@ internal sealed record Options(
         Defaults:
           format: step, STEP AP203
           output: <KOMPAS file folder>\print\<same-name>.step
-          action: normal commands use Bambu Studio default file-open; --new-window starts a separate window
+          action: normal commands reuse Bambu Studio; --new-window starts a separate window
           dxf-sketch output: <KOMPAS file folder>\laser\<model>-<sketch>.dxf
           all-sketches-dxf output: <KOMPAS file folder>\dfx\NN-<model>-<sketch>.dxf
 
