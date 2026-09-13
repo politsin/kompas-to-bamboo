@@ -37,8 +37,11 @@ if (-not (Test-IsAdministrator)) {
 
     Write-Host "Administrator rights are required. Opening elevated PowerShell via UAC..."
     $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
-    if ($null -ne $process.ExitCode -and $process.ExitCode -ne 0) {
-        exit $process.ExitCode
+    if ($null -eq $process) {
+        throw "UAC elevation was cancelled. Installation was not started."
+    }
+    if ($process.ExitCode -ne 0) {
+        throw "Elevated installer failed with exit code $($process.ExitCode). Installation was not applied."
     }
     exit 0
 }
@@ -64,6 +67,14 @@ $legacyConfigPaths = @(
     'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambu.kit.config',
     'C:\ProgramData\ASCON\KOMPAS-3D\24\KompasBambuDummy.kit.config'
 )
+
+$kompasProcesses = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.ProcessName -match '^KOMPAS(?:-|$)'
+})
+if ($kompasProcesses.Count -gt 0) {
+    $processList = $kompasProcesses | ForEach-Object { "$($_.ProcessName) (PID $($_.Id))" }
+    throw "KOMPAS-3D IS OPEN: $($processList -join ', '). Close KOMPAS-3D completely before installation so its RTW library and UI cache can be updated."
+}
 
 if (-not $SkipBuild) {
     Push-Location $ProjectRoot
@@ -293,3 +304,10 @@ $installedAppXml.SelectNodes('//appCommand') | ForEach-Object {
     Write-Host ("  {0}: {1}" -f $id, $title)
 }
 Write-Host "Restart KOMPAS to refresh the Applications menu."
+
+Write-Host "Verifying installed KOMPAS integration..."
+& (Join-Path $ProjectRoot 'check-rtw-install.ps1') -KompasRoot $KompasRoot -ProjectRoot $ProjectRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "Installation verification failed. Do not open KOMPAS until check-rtw-install.ps1 succeeds."
+}
+Write-Host "INSTALLATION VERIFIED. You can start KOMPAS now."
