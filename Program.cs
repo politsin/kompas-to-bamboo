@@ -290,15 +290,21 @@ internal sealed class App
         int command = format == ExportFormat.Step ? StepAp203 : FormatStl;
         object result = Com.Invoke(converter, "Convert", documentInfo.FullPath, exportPath, command, false);
 
+        if (File.Exists(exportPath) && new FileInfo(exportPath).Length > 0)
+        {
+            if (result is int nonZeroCode && nonZeroCode != 0)
+            {
+                Log($"KOMPAS converter returned code {nonZeroCode}, but export file was created: {exportPath}");
+            }
+            return;
+        }
+
         if (result is int code && code != 0)
         {
             throw new InvalidOperationException($"KOMPAS converter returned code {code}.");
         }
 
-        if (!File.Exists(exportPath) || new FileInfo(exportPath).Length == 0)
-        {
-            throw new InvalidOperationException($"Export file was not created or is empty: {exportPath}");
-        }
+        throw new InvalidOperationException($"Export file was not created or is empty: {exportPath}");
     }
 
     private static void ExportWithApi5(object document, string exportPath, ExportFormat format)
