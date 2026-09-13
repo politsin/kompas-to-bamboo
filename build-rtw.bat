@@ -19,7 +19,7 @@ if errorlevel 1 (
 
 if not exist "%OUT%" mkdir "%OUT%"
 
-"%GXX%" -shared -municode -Os -static -static-libgcc -static-libstdc++ -o "%RTW%" "%SRC%" -Wl,--out-implib,"%OUT%\KompasBambu.a" -lshell32 -luser32
+"%GXX%" -shared -municode -Os -static -static-libgcc -static-libstdc++ -o "%RTW%" "%SRC%" -Wl,--out-implib,"%OUT%\KompasBambu.a" -lshell32 -luser32 -lole32 -loleaut32 -luuid
 if errorlevel 1 exit /b 1
 
 echo Built "%RTW%"

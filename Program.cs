@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
 
 return new App().Run(args);
@@ -35,6 +36,14 @@ internal sealed class App
         {
             Options options = Options.Parse(args);
             Log($"Start: {string.Join(" ", args)}");
+            if (options.CallerProcessId is not null)
+            {
+                Log($"Caller KOMPAS PID: {options.CallerProcessId}");
+            }
+            if (!string.IsNullOrWhiteSpace(options.ExpectedDocumentPath))
+            {
+                Log($"Expected document from RTW: {options.ExpectedDocumentPath}");
+            }
 
             if (options.ShowHelp)
             {
@@ -46,6 +55,37 @@ internal sealed class App
             object? kompas5 = Com.TryGetActiveObject("KOMPAS.Application.5");
             object document = GetActive3DDocument(kompas5 ?? kompas7);
             DocumentInfo documentInfo = GetDocumentInfo(document);
+            Log($"COM active document: {documentInfo.FullPath ?? documentInfo.Name}");
+
+            if (!string.IsNullOrWhiteSpace(options.ExpectedDocumentPath))
+            {
+                string expectedPath = Path.GetFullPath(options.ExpectedDocumentPath);
+                if (!options.SketchDxf && !options.AllSketchesDxf)
+                {
+                    documentInfo = DocumentInfo.FromPath(expectedPath);
+                    string exportPathFromExpectedDocument = BuildExportPath(documentInfo, options);
+                    ExportWithConverterFile(kompas7, documentInfo, exportPathFromExpectedDocument, options.Format);
+                    Console.WriteLine($"Exported: {exportPathFromExpectedDocument}");
+                    Log($"Exported from RTW document path: {exportPathFromExpectedDocument}");
+
+                    if (options.OpenBambu)
+                    {
+                        OpenInBambu(exportPathFromExpectedDocument, options);
+                        Console.WriteLine("File sent to Bambu Studio.");
+                        Log("File sent to Bambu Studio.");
+                    }
+
+                    return 0;
+                }
+
+                if (!PathsEqual(documentInfo.FullPath, expectedPath))
+                {
+                    throw new InvalidOperationException(
+                        "KOMPAS COM returned a different active document than the RTW command source. " +
+                        $"RTW document: {expectedPath}. COM document: {documentInfo.FullPath ?? "<unsaved>"}. " +
+                        "Close duplicate KOMPAS windows and retry.");
+                }
+            }
 
             if (options.SketchDxf)
             {
@@ -430,6 +470,8 @@ internal sealed class App
             {
                 throw new InvalidOperationException($"DXF file was not created or is empty: {exportPath}");
             }
+
+            RemoveDxfVariable(exportPath, "$PDMODE");
         }
         finally
         {
@@ -649,11 +691,10 @@ internal sealed class App
             UseShellExecute = false,
             WorkingDirectory = Path.GetDirectoryName(bambuPath) ?? Environment.CurrentDirectory
         };
-        // Use Bambu's native IPC; STL retains its original launch arguments.
+        // Bambu Studio's default file-open path reuses the existing instance.
+        // Keep an explicit flag only for the forced new-window commands.
         if (options.NewWindow)
             startInfo.ArgumentList.Add("--no-single-instance");
-        else if (options.Format == ExportFormat.Step)
-            startInfo.ArgumentList.Add("--single-instance");
         startInfo.ArgumentList.Add(filePath);
         Log($"Bambu arguments: {string.Join(" ", startInfo.ArgumentList)}");
         using var process = Process.Start(startInfo);
@@ -692,6 +733,42 @@ internal sealed class App
         {
         }
     }
+
+    private static void RemoveDxfVariable(string path, string variableName)
+    {
+        try
+        {
+            string[] lines = File.ReadAllLines(path, Encoding.Default);
+            var filtered = new List<string>(lines.Length);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (string.Equals(lines[i].Trim(), variableName, StringComparison.OrdinalIgnoreCase)
+                    && filtered.Count > 0
+                    && string.Equals(filtered[^1].Trim(), "9", StringComparison.OrdinalIgnoreCase)) {
+                    filtered.RemoveAt(filtered.Count - 1);
+                    i += 2;
+                    continue;
+                }
+
+                filtered.Add(lines[i]);
+            }
+
+            File.WriteAllLines(path, filtered, Encoding.Default);
+        }
+        catch (Exception ex)
+        {
+            Log($"DXF cleanup warning: {ex.Message}");
+        }
+    }
+
+    private static bool PathsEqual(string? left, string right)
+    {
+        if (string.IsNullOrWhiteSpace(left)) {
+            return false;
+        }
+
+        return string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 internal enum ExportFormat
@@ -700,7 +777,20 @@ internal enum ExportFormat
     Stl
 }
 
-internal sealed record DocumentInfo(string Name, string Directory, string? FullPath);
+internal sealed record DocumentInfo(string Name, string Directory, string? FullPath)
+{
+    public static DocumentInfo FromPath(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new InvalidOperationException($"Document path has no directory: {path}");
+        }
+
+        return new DocumentInfo(Path.GetFileNameWithoutExtension(fullPath), directory, fullPath);
+    }
+}
 
 internal sealed record SketchExportStats(int Copied, int Skipped);
 
@@ -713,7 +803,7 @@ internal sealed record LineSegCurve(double X1, double Y1, double X2, double Y2) 
 {
     public override void Draw(object document2D)
     {
-        Com.Invoke(document2D, "ksLineSeg", X1, Y1, X2, Y2, 1);
+        Com.Invoke(document2D, "ksLineSeg", X1, Y1, X2, Y2, 2);
     }
 }
 
@@ -721,7 +811,7 @@ internal sealed record CircleCurve(double Xc, double Yc, double Radius) : Sketch
 {
     public override void Draw(object document2D)
     {
-        Com.Invoke(document2D, "ksCircle", Xc, Yc, Radius, 1);
+        Com.Invoke(document2D, "ksCircle", Xc, Yc, Radius, 2);
     }
 }
 
@@ -729,7 +819,7 @@ internal sealed record ArcCurve(double Xc, double Yc, double Radius, double Angl
 {
     public override void Draw(object document2D)
     {
-        Com.Invoke(document2D, "ksArcByAngle", Xc, Yc, Radius, Angle1, Angle2, Direction, 1);
+        Com.Invoke(document2D, "ksArcByAngle", Xc, Yc, Radius, Angle1, Angle2, Direction, 2);
     }
 }
 
@@ -741,6 +831,8 @@ internal sealed record Options(
     bool ShowHelp,
     bool SketchDxf,
     bool AllSketchesDxf,
+    string? ExpectedDocumentPath,
+    int? CallerProcessId,
     bool NewWindow = false)
 {
     public static Options Parse(string[] args)
@@ -752,6 +844,8 @@ internal sealed record Options(
         bool allSketchesDxf = false;
         string? bambuPath = null;
         string? outputFolderName = null;
+        string? expectedDocumentPath = null;
+        int? callerProcessId = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -804,6 +898,12 @@ internal sealed record Options(
                 case "--out-dir":
                     outputFolderName = ReadNext(args, ref i, "--out-dir");
                     break;
+                case "--document":
+                    expectedDocumentPath = ReadNext(args, ref i, "--document");
+                    break;
+                case "--caller-pid":
+                    callerProcessId = int.Parse(ReadNext(args, ref i, "--caller-pid"), CultureInfo.InvariantCulture);
+                    break;
                 case "-h":
                 case "--help":
                 case "/?":
@@ -815,6 +915,8 @@ internal sealed record Options(
                         ShowHelp: true,
                         SketchDxf: sketchDxf,
                         AllSketchesDxf: allSketchesDxf,
+                        ExpectedDocumentPath: expectedDocumentPath,
+                        CallerProcessId: callerProcessId,
                         NewWindow: newWindow);
                 default:
                     throw new ArgumentException($"Unknown argument: {arg}");
@@ -829,6 +931,8 @@ internal sealed record Options(
             ShowHelp: false,
             SketchDxf: sketchDxf,
             AllSketchesDxf: allSketchesDxf,
+            ExpectedDocumentPath: expectedDocumentPath,
+            CallerProcessId: callerProcessId,
             NewWindow: newWindow);
     }
 
@@ -839,13 +943,14 @@ internal sealed record Options(
 
         Usage:
           kompas-bambu [step|stl] [--new-window] [open|export] [--out-dir <name>] [--bambu <path>]
+          kompas-bambu [step|stl] [--document <path>] [--caller-pid <pid>]
           kompas-bambu dxf-sketch [--out-dir <name>]
           kompas-bambu all-sketches-dxf [--out-dir <name>]
 
         Defaults:
           format: step, STEP AP203
           output: <KOMPAS file folder>\print\<same-name>.step
-          action: STEP reuses Bambu Studio; STL follows Bambu preferences
+          action: normal commands use Bambu Studio default file-open; --new-window starts a separate window
           dxf-sketch output: <KOMPAS file folder>\laser\<model>-<sketch>.dxf
           all-sketches-dxf output: <KOMPAS file folder>\dfx\NN-<model>-<sketch>.dxf
 
