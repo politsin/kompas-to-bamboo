@@ -10,6 +10,7 @@ from Path.Main import Job
 from Path.Post.scripts import grbl_legacy_post
 from Path.Main.Job import PathToolController
 from Path.Op import Drilling
+from Path.Op import Profile
 from Path.Tool.toolbit import ToolBitBallend, ToolBitDrill, ToolBitEndmill
 
 DRILL_SIZES_MM = [round(size / 10, 1) for size in range(6, 31)]
@@ -76,6 +77,22 @@ def find_vertical_holes(objects, origin):
     return holes
 
 
+def create_corn_outline(job, model, controller, bounds):
+    """Cut the complete outside contour when the STEP has no drillable holes."""
+    operation = Profile.Create("Corn mill outside contour", parentJob=job)
+    operation.Label = "Corn endmill 3 mm — outside contour"
+    # An empty subelement list tells Path to use the complete model outline.
+    operation.Base = [(model, [])]
+    operation.ToolController = controller
+    operation.Side = "Outside"
+    operation.processHoles = False
+    operation.processCircles = False
+    operation.processPerimeter = True
+    operation.StepDown = quantity(1.0)
+    operation.FinalDepth = quantity(bounds["zmin"] - bounds["zmax"])
+    return operation
+
+
 def create_job(step_path, output_path, status_path):
     document = App.newDocument("Kompas_CAM_Job")
     Import.insert(step_path, document.Name)
@@ -131,6 +148,11 @@ def create_job(step_path, output_path, status_path):
         operation.PeckEnabled = True
         operation.PeckDepth = quantity(0.5)
 
+    fallback_operation = None
+    if not holes:
+        fallback_operation = create_corn_outline(
+            job, cam_model, controllers[("corn", 3.0)], bounds)
+
     document.recompute()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     gcode_path = os.path.splitext(output_path)[0] + ".gcode"
@@ -142,7 +164,9 @@ def create_job(step_path, output_path, status_path):
     document.saveAs(output_path)
     write_status(status_path, state="created", outputFile=output_path, holes=holes,
                  machine="LUNYEE 4040 Titan", postProcessor="grbl", workCoordinateOrigin="Xmin/Ymin/Zmax",
-                 gcodeFile=gcode_path, drillOperations=len(holes_by_drill), toolControllers=len(job.Tools.Group))
+                 gcodeFile=gcode_path, drillOperations=len(holes_by_drill),
+                 fallbackOperation=(fallback_operation.Label if fallback_operation else None),
+                 toolControllers=len(job.Tools.Group))
 
 
 def main():
