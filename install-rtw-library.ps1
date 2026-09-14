@@ -62,6 +62,7 @@ $rtwSource = Join-Path $ProjectRoot 'rtw\bin\KompasBambu.rtw'
 $xmlSource = Join-Path $ProjectRoot 'rtw\KompasBambu.xml'
 $bridgeProject = Join-Path $ProjectRoot 'bridge\KompasBambu.Bridge.csproj'
 $bridgeSourceDir = Join-Path $ProjectRoot 'bridge\dist'
+$bridgeFreeCadSourceDir = Join-Path $ProjectRoot 'bridge\freecad'
 $bridgeTargetDir = Join-Path $env:LOCALAPPDATA 'KompasBambu\Bridge'
 $exporterFiles = @(
     'kompas-bambu.exe',
@@ -120,6 +121,9 @@ if (-not (Test-Path $xmlSource)) {
 if (-not (Test-Path $bridgeSourceDir)) {
     throw "Bambu Bridge build output is missing: $bridgeSourceDir."
 }
+if (-not (Test-Path (Join-Path $bridgeFreeCadSourceDir 'cam_job.py'))) {
+    throw "FreeCAD CAM script is missing: $(Join-Path $bridgeFreeCadSourceDir 'cam_job.py')."
+}
 
 # The bridge is an independent Windows application in the user profile. The
 # RTW/exporter only talks to it through a local named-pipe command API.
@@ -131,6 +135,8 @@ if ($bridgeProcesses.Count -gt 0) {
 }
 New-Item -ItemType Directory -Path $bridgeTargetDir -Force | Out-Null
 Copy-Item -Path (Join-Path $bridgeSourceDir '*') -Destination $bridgeTargetDir -Force
+New-Item -ItemType Directory -Path (Join-Path $bridgeTargetDir 'freecad') -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $bridgeFreeCadSourceDir 'cam_job.py') -Destination (Join-Path $bridgeTargetDir 'freecad\cam_job.py') -Force
 
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 
