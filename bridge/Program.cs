@@ -75,8 +75,15 @@ internal sealed class BridgeServer
             // with a model path. Its --*-single-instance switches exit with -2.
             start.ArgumentList.Add(request.FilePath);
             Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start Bambu Studio.");
-            string state = request.Operation == "new-window" ? "started-new-window" : "started-bambu";
-            Log(state, request, $"pid={process.Id}; args={string.Join(" ", start.ArgumentList)}");
+            string state = "started-bambu";
+            string detail = $"pid={process.Id}; args={string.Join(" ", start.ArgumentList)}";
+            if (request.Operation == "new-window")
+            {
+                nint openedWindow = WaitForBambuWindow(process, TimeSpan.FromSeconds(15));
+                state = "opened-new-window";
+                detail += $"; window=0x{openedWindow:X}";
+            }
+            Log(state, request, detail);
             WriteStatus(request, state, null);
         }
         catch (Exception error)
@@ -123,6 +130,26 @@ internal sealed class BridgeServer
         string? envPath = Environment.GetEnvironmentVariable("BAMBU_STUDIO_EXE");
         string[] candidates = [configuredPath ?? string.Empty, envPath ?? string.Empty, @"C:\Program Files\Bambu Studio\bambu-studio.exe"];
         return candidates.FirstOrDefault(File.Exists) ?? throw new FileNotFoundException("Bambu Studio executable was not found.");
+    }
+
+    private static nint WaitForBambuWindow(Process process, TimeSpan timeout)
+    {
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        do
+        {
+            process.Refresh();
+            if (process.HasExited)
+            {
+                throw new InvalidOperationException($"Bambu Studio exited before opening a new window (exit code {process.ExitCode}).");
+            }
+
+            nint window = process.MainWindowHandle;
+            if (window != nint.Zero) return window;
+            Thread.Sleep(250);
+        }
+        while (stopwatch.Elapsed < timeout);
+
+        throw new TimeoutException($"Bambu Studio process {process.Id} did not create a window within {timeout.TotalSeconds:0} seconds.");
     }
 
     private static string ResolveFreeCadCmd()

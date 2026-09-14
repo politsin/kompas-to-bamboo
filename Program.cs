@@ -54,8 +54,27 @@ internal sealed class App
                 return 0;
             }
 
-            object kompas7 = Com.GetActiveObject("KOMPAS.Application.7");
+            object kompas7 = Com.GetActiveObjectWithRetry(
+                "KOMPAS.Application.7",
+                options.CallerProcessId is null ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(10));
             object? kompas5 = Com.TryGetActiveObject("KOMPAS.Application.5");
+
+            if (!string.IsNullOrWhiteSpace(options.ExpectedDocumentPath) && !options.SketchDxf && !options.AllSketchesDxf)
+            {
+                DocumentInfo expectedDocument = DocumentInfo.FromPath(Path.GetFullPath(options.ExpectedDocumentPath));
+                string exportPathFromExpectedDocument = BuildExportPath(expectedDocument, options);
+                ExportWithConverterFile(kompas7, expectedDocument, exportPathFromExpectedDocument, options.Format);
+                Console.WriteLine($"Exported: {exportPathFromExpectedDocument}");
+                Log($"Exported from RTW document path: {exportPathFromExpectedDocument}");
+
+                if (options.SendToBridge)
+                {
+                    SubmitToBridge(exportPathFromExpectedDocument, options);
+                }
+
+                return 0;
+            }
+
             object document = GetActive3DDocument(kompas5 ?? kompas7);
             DocumentInfo documentInfo = GetDocumentInfo(document);
             Log($"COM active document: {documentInfo.FullPath ?? documentInfo.Name}");
@@ -63,22 +82,6 @@ internal sealed class App
             if (!string.IsNullOrWhiteSpace(options.ExpectedDocumentPath))
             {
                 string expectedPath = Path.GetFullPath(options.ExpectedDocumentPath);
-                if (!options.SketchDxf && !options.AllSketchesDxf)
-                {
-                    documentInfo = DocumentInfo.FromPath(expectedPath);
-                    string exportPathFromExpectedDocument = BuildExportPath(documentInfo, options);
-                    ExportWithConverterFile(kompas7, documentInfo, exportPathFromExpectedDocument, options.Format);
-                    Console.WriteLine($"Exported: {exportPathFromExpectedDocument}");
-                    Log($"Exported from RTW document path: {exportPathFromExpectedDocument}");
-
-                    if (options.SendToBridge)
-                    {
-                        SubmitToBridge(exportPathFromExpectedDocument, options);
-                    }
-
-                    return 0;
-                }
-
                 if (!PathsEqual(documentInfo.FullPath, expectedPath))
                 {
                     throw new InvalidOperationException(
@@ -240,25 +243,23 @@ internal sealed class App
 
     private static void Export(object kompas, object document, DocumentInfo documentInfo, string exportPath, ExportFormat format)
     {
+        DeletePreviousExport(exportPath);
         Exception? api5Error = null;
 
         try
         {
             ExportWithApi5(document, exportPath, format);
+            return;
         }
         catch (Exception ex)
         {
             api5Error = ex;
         }
 
-        if (File.Exists(exportPath) && new FileInfo(exportPath).Length > 0)
-        {
-            return;
-        }
-
         try
         {
             ExportWithApi7(kompas, document, exportPath, format);
+            return;
         }
         catch (Exception api7Error)
         {
@@ -285,16 +286,18 @@ internal sealed class App
                 "The active KOMPAS document is not saved. Save it once before using file-based converter export.");
         }
 
+        DeletePreviousExport(exportPath);
         object converter = GetConverter(kompas);
-        int command = format == ExportFormat.Step ? StepAp203 : FormatStl;
+        int command = format == ExportFormat.Step ? FormatStep : FormatStl;
         object result = Com.Invoke(converter, "Convert", documentInfo.FullPath, exportPath, command, false);
 
-        if (File.Exists(exportPath) && new FileInfo(exportPath).Length > 0)
+        if (File.Exists(exportPath))
         {
             if (result is int nonZeroCode && nonZeroCode != 0)
             {
-                Log($"KOMPAS converter returned code {nonZeroCode}, but export file was created: {exportPath}");
+                Log($"KOMPAS converter returned code {nonZeroCode}; validating output before use: {exportPath}");
             }
+            ValidateExportFile(exportPath, format);
             return;
         }
 
@@ -336,10 +339,7 @@ internal sealed class App
             throw new InvalidOperationException($"KOMPAS returned false while exporting {exportPath}.");
         }
 
-        if (!File.Exists(exportPath) || new FileInfo(exportPath).Length == 0)
-        {
-            throw new InvalidOperationException($"Export file was not created or is empty: {exportPath}");
-        }
+        ValidateExportFile(exportPath, format);
     }
 
     private static void ExportWithApi7(object kompas, object document, string exportPath, ExportFormat format)
@@ -371,9 +371,46 @@ internal sealed class App
             throw new InvalidOperationException($"KOMPAS returned false while exporting {exportPath}.");
         }
 
-        if (!File.Exists(exportPath) || new FileInfo(exportPath).Length == 0)
+        ValidateExportFile(exportPath, format);
+    }
+
+    private static void DeletePreviousExport(string exportPath)
+    {
+        if (File.Exists(exportPath)) File.Delete(exportPath);
+    }
+
+    private static void ValidateExportFile(string exportPath, ExportFormat format)
+    {
+        if (!File.Exists(exportPath))
         {
-            throw new InvalidOperationException($"Export file was not created or is empty: {exportPath}");
+            throw new InvalidOperationException($"Export file was not created: {exportPath}");
+        }
+
+        using var stream = File.OpenRead(exportPath);
+        if (format == ExportFormat.Step)
+        {
+            byte[] header = new byte[Math.Min(32, checked((int)stream.Length))];
+            _ = stream.Read(header, 0, header.Length);
+            string text = Encoding.ASCII.GetString(header);
+            if (!text.StartsWith("ISO-10303-21;", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"KOMPAS created an invalid STEP file (expected ISO-10303-21 header): {exportPath}");
+            }
+            return;
+        }
+
+        if (stream.Length < 84)
+        {
+            throw new InvalidOperationException($"KOMPAS created an invalid binary STL file (smaller than 84 bytes): {exportPath}");
+        }
+        stream.Position = 80;
+        Span<byte> countBuffer = stackalloc byte[4];
+        _ = stream.Read(countBuffer);
+        uint triangleCount = BitConverter.ToUInt32(countBuffer);
+        long expectedLength = 84L + 50L * triangleCount;
+        if (stream.Length != expectedLength)
+        {
+            throw new InvalidOperationException($"KOMPAS created an invalid binary STL file (triangle count does not match file length): {exportPath}");
         }
     }
 
@@ -1207,6 +1244,30 @@ internal static class BridgeClient
 internal static class Com
 {
     private const int SOk = 0;
+
+    public static object GetActiveObjectWithRetry(string progId, TimeSpan timeout)
+    {
+        Exception? lastError = null;
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        do
+        {
+            try
+            {
+                return GetActiveObject(progId);
+            }
+            catch (Exception error)
+            {
+                lastError = error;
+                Thread.Sleep(250);
+            }
+        }
+        while (stopwatch.Elapsed < timeout);
+
+        throw new InvalidOperationException(
+            $"Could not connect to {progId} within {timeout.TotalSeconds:0} seconds. " +
+            "Keep KOMPAS-3D open with the source 3D document loaded, then retry.",
+            lastError);
+    }
 
     public static object GetActiveObject(string progId)
     {
