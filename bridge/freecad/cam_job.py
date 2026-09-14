@@ -7,6 +7,7 @@ import FreeCAD as App
 import Import
 import Part
 from Path.Main import Job
+from Path.Post.scripts import grbl_legacy_post
 from Path.Main.Job import PathToolController
 from Path.Op import Drilling
 from Path.Tool.toolbit import ToolBitBallend, ToolBitDrill, ToolBitEndmill
@@ -132,10 +133,16 @@ def create_job(step_path, output_path, status_path):
 
     document.recompute()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    gcode_path = os.path.splitext(output_path)[0] + ".gcode"
+    # The Job property is an App::DocumentObjectGroup; the postprocessor
+    # expects its concrete operation objects, not the group container.
+    grbl_legacy_post.export(job.Operations.Group, gcode_path, "")
+    if not os.path.exists(gcode_path) or os.path.getsize(gcode_path) == 0:
+        raise RuntimeError("GRBL postprocessor did not create G-code.")
     document.saveAs(output_path)
     write_status(status_path, state="created", outputFile=output_path, holes=holes,
                  machine="LUNYEE 4040 Titan", postProcessor="grbl", workCoordinateOrigin="Xmin/Ymin/Zmax",
-                 drillOperations=len(holes_by_drill), toolControllers=len(job.Tools.Group))
+                 gcodeFile=gcode_path, drillOperations=len(holes_by_drill), toolControllers=len(job.Tools.Group))
 
 
 def main():
