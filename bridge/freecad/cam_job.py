@@ -10,6 +10,7 @@ from Path.Main import Job
 from Path.Post.scripts import grbl_legacy_post
 from Path.Main.Job import PathToolController
 from Path.Op import Drilling
+from Path.Op import Pocket
 from Path.Op import Profile
 from Path.Tool.toolbit import ToolBitBallend, ToolBitDrill, ToolBitEndmill
 
@@ -93,6 +94,38 @@ def create_corn_outline(job, model, controller, bounds):
     return operation
 
 
+def create_corn_facing(job, model, controller, bounds):
+    """Clear the largest horizontal model face, preserving islands such as pins."""
+    horizontal_faces = []
+    for index, face in enumerate(model.Shape.Faces, 1):
+        box = face.BoundBox
+        if box.ZLength > 0.001:
+            continue
+        try:
+            normal = face.normalAt(0, 0)
+        except Exception:
+            continue
+        if normal.z < 0.999:
+            continue
+        horizontal_faces.append((face.Area, index))
+    if not horizontal_faces:
+        return None
+
+    _, face_index = max(horizontal_faces)
+    top_face = model.Shape.Faces[face_index - 1]
+    operation = Pocket.Create("Corn mill top surface", parentJob=job)
+    operation.Label = "Corn endmill 3 mm — top surface around pins"
+    operation.Base = [(model, ["Face{}".format(face_index)])]
+    operation.ToolController = controller
+    operation.StepOver = 40
+    operation.StepDown = quantity(1.0)
+    # The work origin is the highest model point (the pin tips).  Clear down
+    # to the broad planar face, retaining the islands bounded by that face.
+    operation.StartDepth = quantity(0)
+    operation.FinalDepth = quantity(top_face.BoundBox.ZMax - bounds["zmax"])
+    return operation
+
+
 def create_job(step_path, output_path, status_path):
     document = App.newDocument("Kompas_CAM_Job")
     Import.insert(step_path, document.Name)
@@ -150,6 +183,7 @@ def create_job(step_path, output_path, status_path):
 
     fallback_operation = None
     if not holes:
+        create_corn_facing(job, cam_model, controllers[("corn", 3.0)], bounds)
         fallback_operation = create_corn_outline(
             job, cam_model, controllers[("corn", 3.0)], bounds)
 
